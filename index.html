@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>RUSTWAKE</title>
+</head>
+<body>
+  <canvas id="game"></canvas>
+
+  <div id="hud" class="hidden">
+    <div id="vignette"></div>
+    <div id="lowhp"></div>
+    <div id="crosshair"><i class="t"></i><i class="b"></i><i class="l"></i><i class="r"></i><i class="dot"></i></div>
+    <div id="hitmarker"><i></i><i></i><i></i><i></i></div>
+    <div id="dmg-dirs"></div>
+    <div id="numbers"></div>
+    <canvas id="radar" width="300" height="300"></canvas>
+    <div id="top">
+      <div id="wave">WAVE 1</div>
+      <div id="remaining"></div>
+    </div>
+    <div id="score-box"><div id="score">0</div><div id="score-label">SCORE</div></div>
+    <div id="announce"><div id="announce-main"></div><div id="announce-sub"></div></div>
+    <div id="prompt"></div>
+    <div id="feed"></div>
+    <div id="vitals">
+      <div class="bar-row"><span class="bar-icon">✚</span><div class="bar"><div id="hp-fill"></div></div><span id="hp-num">100</span></div>
+      <div class="bar-row"><span class="bar-icon">⛨</span><div class="bar armor"><div id="armor-fill"></div></div><span id="armor-num">0</span></div>
+    </div>
+    <div id="weapon">
+      <div id="weapon-name"></div>
+      <div id="ammo-row"><span id="ammo">30</span><span id="reserve">/ 180</span></div>
+      <div id="reload-bar"><div id="reload-fill"></div></div>
+      <div id="grenades"></div>
+      <div id="slots"></div>
+    </div>
+    <div id="fps"></div>
+  </div>
+
+  <div id="menu" class="screen">
+    <div class="panel title-panel">
+      <div class="kicker">FACILITY PURGE PROTOCOL</div>
+      <h1>RUSTWAKE</h1>
+      <p class="tag">The machines kept working after everyone left. Shut them down.</p>
+      <button id="btn-play" class="primary">Deploy</button>
+      <button id="btn-settings">Settings</button>
+      <div id="best"></div>
+      <div class="hint">WASD move · Mouse / trackpad aim · Click or F fire · Right-click or Q aim · R reload · G grenade · Shift sprint · C crouch · 1–4 weapons · Esc pause</div>
+    </div>
+  </div>
+
+  <div id="pause" class="screen hidden">
+    <div class="panel">
+      <h2>Paused</h2>
+      <button id="btn-resume" class="primary">Resume</button>
+      <button id="btn-pause-settings">Settings</button>
+      <button id="btn-restart">Restart run</button>
+      <button id="btn-quit">Quit to menu</button>
+    </div>
+  </div>
+
+  <div id="settings" class="screen hidden">
+    <div class="panel wide">
+      <h2>Settings</h2>
+      <div id="settings-body"></div>
+      <div class="row-buttons">
+        <button id="btn-trackpad">Apply trackpad preset</button>
+        <button id="btn-defaults">Reset to defaults</button>
+        <button id="btn-settings-back" class="primary">Done</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="upgrade" class="screen hidden">
+    <div class="panel wide clear">
+      <div class="kicker" id="upgrade-kicker">WAVE CLEARED</div>
+      <h2>Choose an upgrade</h2>
+      <div id="cards"></div>
+      <div class="hint">Click a card or press 1, 2 or 3</div>
+    </div>
+  </div>
+
+  <div id="gameover" class="screen hidden">
+    <div class="panel">
+      <div class="kicker">SIGNAL LOST</div>
+      <h2>You were overrun</h2>
+      <div id="stats"></div>
+      <button id="btn-again" class="primary">Redeploy</button>
+      <button id="btn-over-quit">Main menu</button>
+    </div>
+  </div>
+
+  <script type="module" src="/src/main.ts"></script>
+</body>
+</html>

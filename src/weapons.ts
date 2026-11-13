@@ -6,7 +6,7 @@ import type { Input } from './input';
 import type { CollisionWorld } from './physics';
 import type { Player } from './player';
 import type { Settings } from './settings';
-import { buildGun, railGlow, type GunModel, type ReloadSpec } from './gunModels';
+import { buildGun, railGlow, throwArm, type GunModel, type ReloadSpec, type ThrowArm } from './gunModels';
 import { makeFlashTexture } from './textures';
 
 export interface WeaponDef {
@@ -70,9 +70,13 @@ export interface FireCtx {
   launch(pos: THREE.Vector3, vel: THREE.Vector3, dmg: number): void;
   /** Strikes robots in a short cone ahead. Returns true if anything was hit. */
   melee(dmg: number): boolean;
+  /** Releases a grenade from the player's hand, at the moment of the throw. */
+  throwGrenade(): void;
 }
 
-const MELEE_TIME = 0.5, MELEE_DAMAGE = 90;
+const MELEE_TIME = 0.5, MELEE_DAMAGE = 90, CUT_TIME = 0.12;
+/** Grenade throw: total time, and progress at which the pin comes out and the grenade leaves the hand. */
+const THROW_TIME = 0.62, THROW_PIN = 0.22, THROW_RELEASE = 0.5;
 
 type V3 = [number, number, number];
 const ZERO3: V3 = [0, 0, 0], DEFAULT_LIFT: V3 = [-0.07, 0.1, 0.03];
@@ -85,19 +89,40 @@ interface ReloadStep { p: number; kind: StepKind; }
  * slide, charging handle or pump; a partial one skips it.
  */
 const MAG = { grab: 0.16, out: 0.22, down: [0.24, 0.36], up: [0.38, 0.54], seat: [0.54, 0.6], toRack: [0.64, 0.74], pull: [0.74, 0.8], back: [0.82, 0.96], backTac: [0.64, 0.84] };
-const CYL = { open: 0.14, load: 0.56, close: 0.75 };
+/** Cylinder: swings out at `open`, rounds go in between `start` and `end`, snaps shut at `close`. */
+const CYL = { open: 0.14, start: 0.2, end: 0.72, close: 0.78 };
 /** Shotgun: shells are loaded between these points; an empty one is pumped at `pump`. */
 const SHELLS = { start: 0.12, end: 0.88, endEmpty: 0.78, pump: 0.86 };
 
-function shellCycle(empty: boolean, rounds: number) {
-  const n = Math.max(1, rounds), end = empty ? SHELLS.endEmpty : SHELLS.end;
-  return { n, len: (end - SHELLS.start) / n };
+/**
+ * Reload styles that load one round at a time. Each round adds to the magazine as it goes in,
+ * and pressing fire with at least one round loaded cuts the reload short.
+ */
+export const ROUND_BY_ROUND: ReadonlySet<ReloadSpec['style']> = new Set(['shells', 'cylinder']);
+
+/** Splits [start, end] into one loading cycle per round. */
+function roundCycle(start: number, end: number, rounds: number) {
+  const n = Math.max(1, rounds);
+  return { n, len: (end - start) / n };
+}
+const shellCycle = (empty: boolean, rounds: number) => roundCycle(SHELLS.start, empty ? SHELLS.endEmpty : SHELLS.end, rounds);
+
+/** Hand path for loading round i of a round-by-round reload: down to fetch it, up to the port, push it in. */
+function loadRound(hand: V3, q: number, reach: V3, fetch: V3, ready: V3): V3 {
+  hand = toward(hand, fetch, ss(q, 0, 0.35));
+  hand = toward(hand, ready, ss(q, 0.35, 0.72));
+  return toward(hand, reach, ss(q, 0.72, 0.9));
 }
 
 /** Sound and ammo steps for a reload, in progress order. */
 function reloadSteps(style: ReloadSpec['style'], empty: boolean, rounds: number): ReloadStep[] {
   if (style === 'mag') return [{ p: MAG.grab, kind: 'grab' }, { p: MAG.out, kind: 'out' }, { p: MAG.seat[1], kind: 'in' }, ...(empty ? [{ p: MAG.pull[1], kind: 'rack' as const }] : [])];
-  if (style === 'cylinder') return [{ p: CYL.open, kind: 'open' }, { p: CYL.load, kind: 'in' }, { p: CYL.close, kind: 'close' }];
+  if (style === 'cylinder') {
+    const { n, len } = roundCycle(CYL.start, CYL.end, rounds), steps: ReloadStep[] = [{ p: CYL.open, kind: 'open' }];
+    for (let i = 0; i < n; i++) steps.push({ p: CYL.start + (i + 0.9) * len, kind: 'shell' });
+    steps.push({ p: CYL.close, kind: 'close' });
+    return steps;
+  }
   const { n, len } = shellCycle(empty, rounds), steps: ReloadStep[] = [];
   for (let i = 0; i < n; i++) steps.push({ p: SHELLS.start + (i + 0.9) * len, kind: 'shell' });
   if (empty) steps.push({ p: SHELLS.pump, kind: 'rack' });
@@ -159,9 +184,7 @@ function reloadPose(spec: ReloadSpec, p: number, empty: boolean, rounds: number,
     const i = Math.min(n - 1, Math.max(0, Math.floor((p - SHELLS.start) / len)));
     const q = (p - SHELLS.start - i * len) / len;
     if (p >= SHELLS.start && q <= 1) {
-      hand = toward(hand, fetch, ss(q, 0, 0.35));
-      hand = toward(hand, ready, ss(q, 0.35, 0.72));
-      hand = toward(hand, reach, ss(q, 0.72, 0.9));
+      hand = loadRound(hand, q, reach, fetch, ready);
       held = q > 0.3 && q < 0.9;
       bump += 0.4 * jolt(q, 0.9, dur * len);
     }
@@ -174,18 +197,23 @@ function reloadPose(spec: ReloadSpec, p: number, empty: boolean, rounds: number,
       tiltOut = 1 - ss(p, 0.84, 1);
     }
   } else {
-    // Cylinder: the hand pushes it out, fetches a speed loader, loads, and the gun flicks it shut.
-    const swing = ss(p, 0.1, 0.18) * (1 - ss(p, CYL.close - 0.03, CYL.close));
+    // Cylinder: swing it out, load rounds one at a time (turning a chamber per round), flick it shut.
+    const { n, len } = roundCycle(CYL.start, CYL.end, rounds);
+    const swing = ss(p, 0.08, 0.16) * (1 - ss(p, CYL.close - 0.03, CYL.close));
     mag = [-0.075 * swing, -0.012 * swing, 0];
-    magRot = [0, 8 * Math.PI * ss(p, CYL.open, CYL.close)];
+    const r = (p - CYL.start) / len, whole = Math.floor(r);
+    const turned = r < 0 ? 0 : Math.min(n, whole + ss(r - whole, 0.9, 1));
+    magRot = [0, 2 * Math.PI * ss(p, 0.08, 0.16) + (Math.PI / 3) * turned];
     hand = toward(hand, reach, ss(p, 0.03, CYL.open));
-    hand = toward(hand, add(reach, [-0.02, -0.35, 0.08]), ss(p, 0.2, 0.32));
-    hand = toward(hand, add(reach, [0, 0, 0.08]), ss(p, 0.34, 0.5));
-    hand = toward(hand, add(reach, [0, 0, 0.035]), ss(p, 0.5, CYL.load));
-    hand = toward(hand, add(reach, [-0.04, -0.12, 0.1]), ss(p, 0.6, 0.7));
-    hand = toward(hand, ZERO3, ss(p, 0.76, 0.9));
-    bump += jolt(p, CYL.load, dur) * 0.5 - jolt(p, CYL.close, dur) * 1.2;
-    tiltOut = 1 - ss(p, 0.78, 1);
+    const i = Math.min(n - 1, Math.max(0, whole)), q = r - i;
+    if (r >= 0 && q <= 1) {
+      hand = loadRound(hand, q, add(reach, [0, 0, 0.035]), add(reach, [-0.02, -0.3, 0.1]), add(reach, [0, 0, 0.09]));
+      held = q > 0.3 && q < 0.9;
+      bump += 0.3 * jolt(q, 0.9, dur * len);
+    }
+    hand = toward(hand, ZERO3, ss(p, CYL.end, CYL.close + 0.1));
+    bump -= jolt(p, CYL.close, dur) * 1.2;
+    tiltOut = 1 - ss(p, CYL.close + 0.02, 1);
   }
 
   const t = tiltIn * tiltOut;
@@ -218,6 +246,9 @@ export class WeaponSystem {
   wantsFire = false;
   /** Counts down through a melee swing; the hit lands part-way through. */
   meleeT = 0;
+  /** Time left in a grenade throw; the gun is lowered while the throwing arm works. */
+  throwT = 0;
+  private arm: ThrowArm;
   private meleeDone = true;
   private adsHeld = false;
   private cooldown = 0;
@@ -245,6 +276,9 @@ export class WeaponSystem {
   private reloadRounds = 0;
   private reloadSteps: ReloadStep[] = [];
   private reloadPrevP = 0;
+  /** Last reload pose, eased out over CUT_TIME when a reload is cut short by firing. */
+  private lastPose: ReloadPose | null = null;
+  private cutT = 0;
 
   constructor(worldScene: THREE.Scene, env: THREE.Texture | null) {
     this.scene.environment = env;
@@ -264,6 +298,9 @@ export class WeaponSystem {
     this.flash = new THREE.Mesh(new THREE.PlaneGeometry(0.2, 0.2), fm);
     this.flash.visible = false;
     this.root.add(this.flash);
+    this.arm = throwArm();
+    this.arm.group.visible = false;
+    this.scene.add(this.arm.group);
     this.muzzleLight = new THREE.PointLight(0xffb060, 0, 16, 1.6);
     worldScene.add(this.muzzleLight);
     this.reset();
@@ -273,7 +310,7 @@ export class WeaponSystem {
     this.states = WEAPONS.map((w, i) => ({ ammo: w.mag, reserve: w.reserve, unlocked: i < 2 }));
     this.mods = { damage: 1, fireRate: 1, mag: 1, reload: 1, crit: 1, reserve: 1, melee: 1, handling: 1 }; this.boost = 1;
     this.current = 1; this.pending = -1; this.switchT = 0;
-    this.reloadT = 0; this.cooldown = 0; this.heat = 0; this.ads = 0; this.adsHeld = false; this.meleeT = 0;
+    this.reloadT = 0; this.cooldown = 0; this.heat = 0; this.ads = 0; this.adsHeld = false; this.meleeT = 0; this.throwT = 0;
     this.grenades = this.maxGrenades = 2;
     this.guns.forEach((g, i) => (g.group.visible = i === this.current));
   }
@@ -385,7 +422,20 @@ export class WeaponSystem {
         if (c.melee(MELEE_DAMAGE * this.mods.melee)) { c.audio.meleeHit(); player.shake = Math.min(1, player.shake + 0.25); }
       }
     }
-    const busy = this.switchT > 0 || this.meleeT > 0;
+    // Grenade: lower the gun, pull the pin, throw. Works while sprinting; interrupts a reload.
+    if (input.wasPressed('grenade') && this.throwT <= 0 && this.meleeT <= 0 && this.switchT <= 0 && this.grenades > 0) {
+      this.grenades--;
+      this.throwT = THROW_TIME; this.reloadT = 0; this.reloadSteps = [];
+    }
+    if (this.throwT > 0) {
+      const before = 1 - this.throwT / THROW_TIME;
+      this.throwT = Math.max(0, this.throwT - dt);
+      const p = 1 - this.throwT / THROW_TIME;
+      if (before < THROW_PIN && p >= THROW_PIN) c.audio.reloadStep('grab');
+      if (before < THROW_RELEASE - 0.06 && p >= THROW_RELEASE - 0.06) c.audio.swing();
+      if (before < THROW_RELEASE && p >= THROW_RELEASE) c.throwGrenade();
+    }
+    const busy = this.switchT > 0 || this.meleeT > 0 || this.throwT > 0;
 
     // Aim
     if (settings.adsToggle) { if (input.wasPressed('ads')) this.adsHeld = !this.adsHeld; }
@@ -421,6 +471,13 @@ export class WeaponSystem {
     const trigger = def.auto ? input.isDown('fire') : this.fireBuf > 0;
     this.wantsFire = trigger || input.isDown('fire');
     this.sprintT += ((player.sprinting ? 1 : 0) - this.sprintT) * Math.min(1, dt * 10);
+    // A gun loading rounds one at a time can be fired mid-reload once a round is in.
+    const style = this.guns[this.current].reload.style;
+    const canCut = this.reloading && st.ammo > 0 && ROUND_BY_ROUND.has(style) && input.wasPressed('fire');
+    if (canCut) {
+      this.reloadT = 0; this.reloadSteps = []; this.cutT = CUT_TIME;
+      if (style === 'cylinder') c.audio.reloadStep('close');
+    }
     if (trigger && !busy && !this.reloading && this.cooldown <= 0 && this.sprintT < 0.5) {
       if (st.ammo > 0) {
         this.fireBuf = 0;
@@ -543,7 +600,14 @@ export class WeaponSystem {
     x -= s * 0.05; y -= s * 0.06; ry += s * 0.55; rx -= s * 0.22;
 
     // Reload: tilt the gun towards the support hand while it works (see reloadPose).
-    const rp = this.reloadT > 0 ? reloadPose(gun.reload, 1 - this.reloadT / this.reloadDur, this.reloadEmpty, this.reloadRounds, this.reloadDur) : null;
+    let rp = this.reloadT > 0 ? reloadPose(gun.reload, 1 - this.reloadT / this.reloadDur, this.reloadEmpty, this.reloadRounds, this.reloadDur) : null;
+    if (rp) { this.lastPose = rp; this.cutT = 0; }
+    else if (this.cutT > 0 && this.lastPose) {
+      // Ease back from wherever the cut-short reload was.
+      this.cutT = Math.max(0, this.cutT - dt);
+      const k = this.cutT / CUT_TIME, lp = this.lastPose, sc = (v: V3): V3 => [v[0] * k, v[1] * k, v[2] * k];
+      rp = { ...lp, gun: sc(lp.gun), gunRot: [lp.gunRot[0] * k, lp.gunRot[1] * k], hand: sc(lp.hand), mag: ZERO3, magRot: [0, 0], held: false, slideBack: 0, pull: 0 };
+    }
     if (rp) { x += rp.gun[0]; y += rp.gun[1]; z += rp.gun[2]; rx += rp.gunRot[0]; rz += rp.gunRot[1]; }
     // Melee: swing the weapon across and forward, then recover.
     if (this.meleeT > 0) {
@@ -551,6 +615,13 @@ export class WeaponSystem {
       const env = p < 0.26 ? p / 0.26 : 1 - (p - 0.26) / 0.74, m = env * env * (3 - 2 * env);
       x -= m * 0.08; y += m * 0.03; z -= m * 0.15; ry += m * 0.8; rz -= m * 0.5; rx += m * 0.12;
     }
+    // Grenade throw: the gun drops out of the way while the arm throws.
+    const th = this.throwT > 0 ? 1 - this.throwT / THROW_TIME : -1;
+    if (th >= 0) {
+      const d = ss(th, 0, 0.16) * (1 - ss(th, 0.7, 0.98));
+      y -= d * 0.32; rx -= d * 0.55; x += d * 0.04;
+    }
+    this.poseArm(th);
     // Swap: drop below the frame and come back.
     if (this.switchT > 0) {
       const p = Math.abs(this.switchT - 0.18) / 0.18;
@@ -584,10 +655,29 @@ export class WeaponSystem {
     }
   }
 
-  /** Takes one grenade if available. */
-  useGrenade(): boolean {
-    if (this.grenades <= 0) return false;
-    this.grenades--;
-    return true;
+  /** Places the throwing arm for throw progress p (hidden when p < 0). */
+  private poseArm(p: number) {
+    const a = this.arm;
+    a.group.visible = p >= 0 && p < 0.8;
+    if (!a.group.visible) return;
+    // Rise into view, pin out, wind back, throw forward, follow through out of frame.
+    let pos: V3 = [0.3, -0.5, -0.3], rot: V3 = [0.2, 0, 0];
+    pos = toward(pos, [0.1, -0.12, -0.34], ss(p, 0, 0.2));
+    rot = toward(rot, [0.1, -0.2, 0.1], ss(p, 0, 0.2));
+    pos = toward(pos, [0.16, -0.02, -0.27], ss(p, 0.3, 0.45));
+    rot = toward(rot, [-0.6, -0.1, -0.35], ss(p, 0.3, 0.45));
+    pos = toward(pos, [0.03, -0.03, -0.58], ss(p, 0.45, THROW_RELEASE + 0.03));
+    rot = toward(rot, [0.7, 0.1, 0.1], ss(p, 0.45, THROW_RELEASE + 0.03));
+    pos = toward(pos, [-0.04, -0.5, -0.48], ss(p, THROW_RELEASE + 0.05, 0.78));
+    rot = toward(rot, [1.2, 0.2, 0.3], ss(p, THROW_RELEASE + 0.05, 0.78));
+    a.group.position.set(...pos);
+    a.group.rotation.set(...rot);
+    a.nade.visible = p < THROW_RELEASE;
+    // The pin and ring come away and drop out of view.
+    const pull = ss(p, THROW_PIN - 0.04, THROW_PIN + 0.1);
+    a.pin.position.set(-0.07 * pull, -0.05 * pull * pull, 0.02 * pull);
+    a.pin.rotation.set(0, 0, 1.5 * pull);
+    a.pin.visible = p < THROW_PIN + 0.1;
   }
+
 }

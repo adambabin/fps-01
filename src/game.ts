@@ -35,22 +35,46 @@ class ViewmodelPass extends Pass {
   }
 }
 
-interface Upgrade { name: string; desc: string; weapon?: boolean; ok?(g: Game): boolean; apply(g: Game): void; }
+export type Track = 'firepower' | 'survival' | 'utility';
+export const TRACKS: Track[] = ['firepower', 'survival', 'utility'];
+export type Keystone = 'overload' | 'spree' | 'laststand' | 'barrier' | 'combatslide' | 'fabricator' | 'doublejump';
+/** Cards taken in a track before its keystones are offered. */
+export const KEYSTONE_RANK = 3;
 
+interface Upgrade { name: string; desc: string; track?: Track; keystone?: Keystone; weapon?: boolean; bonus?: boolean; ok?(g: Game): boolean; apply(g: Game): void; }
+
+/**
+ * Regular cards, grouped into three tracks. After each wave one random card is offered
+ * from each track; taking a card raises that track's rank.
+ */
 const UPGRADES: Upgrade[] = [
-  { name: 'Hollow-point rounds', desc: '+20% damage with every weapon.', apply: (g) => (g.weapons.mods.damage *= 1.2) },
-  { name: 'Tuned actuator', desc: '+15% rate of fire.', apply: (g) => (g.weapons.mods.fireRate *= 1.15) },
-  { name: 'Extended magazines', desc: '+30% magazine capacity.', apply: (g) => (g.weapons.mods.mag *= 1.3) },
-  { name: 'Speed loader', desc: 'Reload 22% faster.', apply: (g) => (g.weapons.mods.reload *= 0.78) },
-  { name: 'Weak-point analyzer', desc: '+40% damage to sensor heads and weak points.', apply: (g) => (g.weapons.mods.crit *= 1.4) },
-  { name: 'Reinforced frame', desc: '+25 maximum health and a full heal.', apply: (g) => { g.player.maxHealth += 25; g.player.health = g.player.maxHealth; } },
-  { name: 'Ablative plating', desc: 'Fills armor now and raises the cap by 25.', apply: (g) => { g.player.maxArmor += 25; g.player.armor = g.player.maxArmor; } },
-  { name: 'Servo boots', desc: '+10% movement speed.', apply: (g) => (g.player.speedMult *= 1.1) },
-  { name: 'Deep pockets', desc: '+50% reserve ammo and a full resupply.', apply: (g) => { g.weapons.mods.reserve *= 1.5; g.weapons.addAmmo(1); } },
-  { name: 'Bandolier', desc: 'Carry one more grenade and refill them.', apply: (g) => { g.weapons.maxGrenades++; g.weapons.grenades = g.weapons.maxGrenades; } },
-  { name: 'Salvage protocol', desc: 'Each robot destroyed restores 3 health.', ok: (g) => g.lifesteal < 9, apply: (g) => (g.lifesteal += 3) },
-  { name: 'Shock gauntlet', desc: '+75% melee damage, and melee kills restore 15 armor.', ok: (g) => g.weapons.mods.melee < 3, apply: (g) => { g.weapons.mods.melee += 0.75; g.meleeArmor += 15; } },
-  { name: 'Nanite weave', desc: 'Regenerate 3 health per second after 5 seconds without damage.', ok: (g) => g.player.regen < 9, apply: (g) => (g.player.regen += 3) },
+  { track: 'firepower', name: 'Hollow-point rounds', desc: '+20% damage with every weapon.', apply: (g) => (g.weapons.mods.damage *= 1.2) },
+  { track: 'firepower', name: 'Tuned actuator', desc: '+15% rate of fire.', apply: (g) => (g.weapons.mods.fireRate *= 1.15) },
+  { track: 'firepower', name: 'Extended magazines', desc: '+30% magazine capacity.', apply: (g) => (g.weapons.mods.mag *= 1.3) },
+  { track: 'firepower', name: 'Speed loader', desc: 'Reload 22% faster.', apply: (g) => (g.weapons.mods.reload *= 0.78) },
+  { track: 'firepower', name: 'Weak-point analyzer', desc: '+40% damage to sensor heads and weak points.', apply: (g) => (g.weapons.mods.crit *= 1.4) },
+  { track: 'firepower', name: 'Shock gauntlet', desc: '+75% melee damage, and melee kills restore 15 armor.', ok: (g) => g.weapons.mods.melee < 3, apply: (g) => { g.weapons.mods.melee += 0.75; g.meleeArmor += 15; } },
+  { track: 'survival', name: 'Reinforced frame', desc: '+25 maximum health and a full heal.', apply: (g) => { g.player.maxHealth += 25; g.player.health = g.player.maxHealth; } },
+  { track: 'survival', name: 'Ablative plating', desc: 'Fills armor now and raises the cap by 25.', apply: (g) => { g.player.maxArmor += 25; g.player.armor = g.player.maxArmor; } },
+  { track: 'survival', name: 'Salvage protocol', desc: 'Each robot destroyed restores 3 health.', ok: (g) => g.lifesteal < 9, apply: (g) => (g.lifesteal += 3) },
+  { track: 'survival', name: 'Nanite weave', desc: 'Regenerate 3 health per second after 5 seconds without damage.', ok: (g) => g.player.regen < 9, apply: (g) => (g.player.regen += 3) },
+  { track: 'utility', name: 'Servo boots', desc: '+10% movement speed.', apply: (g) => (g.player.speedMult *= 1.1) },
+  { track: 'utility', name: 'Deep pockets', desc: '+50% reserve ammo and a full resupply.', apply: (g) => { g.weapons.mods.reserve *= 1.5; g.weapons.addAmmo(1); } },
+  { track: 'utility', name: 'Bandolier', desc: 'Carry one more grenade and refill them.', apply: (g) => { g.weapons.maxGrenades++; g.weapons.grenades = g.weapons.maxGrenades; } },
+  { track: 'utility', name: 'Quick hands', desc: 'Swap weapons and aim down sights 35% faster.', ok: (g) => g.weapons.mods.handling < 1.8, apply: (g) => (g.weapons.mods.handling *= 1.35) },
+  { track: 'utility', name: 'Tractor field', desc: 'Pickups are pulled in from twice as far, and faster.', ok: (g) => g.pickupReach < 6, apply: (g) => (g.pickupReach *= 2) },
+  { track: 'utility', name: 'Scavenger', desc: 'Robots drop supplies 35% more often.', ok: (g) => g.dropMult < 1.8, apply: (g) => (g.dropMult *= 1.35) },
+];
+
+/** Offered when a track reaches rank 3. Pick one; the others in that track are gone for the run. */
+const KEYSTONES: Upgrade[] = [
+  { track: 'firepower', keystone: 'overload', name: 'Overload rounds', desc: 'Weak-point kills make the robot explode, damaging robots nearby.', apply: () => {} },
+  { track: 'firepower', keystone: 'spree', name: 'Killing spree', desc: 'Each kill within 3 s of the last adds +10% fire rate and reload speed, up to 5 stacks.', apply: () => {} },
+  { track: 'survival', keystone: 'laststand', name: 'Last stand', desc: 'Once per wave, a hit that would kill you leaves you at 1 health, invulnerable for 2 s.', apply: (g) => (g.lastStandReady = true) },
+  { track: 'survival', keystone: 'barrier', name: 'Kinetic barrier', desc: 'A shield blocks one hit completely. It recharges after 6 s without taking damage.', apply: (g) => (g.barrierUp = true) },
+  { track: 'utility', keystone: 'combatslide', name: 'Combat slide', desc: 'Starting a slide reloads your weapon, and hits cannot touch you for a moment.', apply: () => {} },
+  { track: 'utility', keystone: 'fabricator', name: 'Grenade fabricator', desc: 'Regain a grenade every 20 s.', apply: () => {} },
+  { track: 'utility', keystone: 'doublejump', name: 'Double jump', desc: 'Jump once more in mid-air.', apply: (g) => (g.player.airJumps = 1) },
 ];
 
 const tmpA = new THREE.Vector3(), tmpB = new THREE.Vector3(), tmpC = new THREE.Vector3();
@@ -79,6 +103,17 @@ export class Game {
   score = 0;
   kills = 0;
   lifesteal = 0;
+  /** Pickup attraction distance (Tractor field) and drop-rate multiplier (Scavenger). */
+  pickupReach = 3.2;
+  dropMult = 1;
+  /** Cards taken per track, and the keystones chosen this run. */
+  ranks: Record<Track, number> = { firepower: 0, survival: 0, utility: 0 };
+  keystones = new Set<Keystone>();
+  lastStandReady = false;
+  barrierUp = false;
+  private spree = 0;
+  private spreeT = 0;
+  private fabT = 0;
   /** Armor restored by each melee kill (Shock gauntlet upgrade). */
   meleeArmor = 0;
   objectives: Objectives;
@@ -167,7 +202,7 @@ export class Game {
     if (isTouchDevice()) {
       this.touch = new TouchControls(this.input);
       document.querySelector('#menu .hint')!.textContent = 'Left thumb: move (push to the rim to sprint) · Right thumb: drag to look · Hold FIRE and drag to shoot while aiming · AIM toggles sights · Play in landscape';
-      document.querySelector('#upgrade .hint')!.textContent = 'Tap a card';
+      document.querySelector('#upgrade .hint')!.textContent = 'Tap a card · Taking three cards from one track unlocks a choice of its keystones ◆';
     }
     this.input.lookActive = () => this.state === 'playing' && this.locked();
     document.addEventListener('pointerlockchange', () => {
@@ -175,9 +210,6 @@ export class Game {
     });
     document.addEventListener('pointerlockerror', () => { if (this.state === 'playing' && !this.locked()) this.pause(); });
     canvas.addEventListener('click', () => { if (this.state === 'playing' && !this.locked()) this.requestLock(); });
-    window.addEventListener('keydown', (e) => {
-      if (this.state === 'upgrade' && ['Digit1', 'Digit2', 'Digit3', 'Digit4'].includes(e.code)) this.pickUpgrade(Number(e.code.slice(5)) - 1);
-    });
     window.addEventListener('resize', () => this.resize());
     document.addEventListener('visibilitychange', () => { if (document.hidden && this.state === 'playing') this.pause(); });
 
@@ -294,6 +326,9 @@ export class Game {
     this.applyDifficulty();
     this.wave = 0; this.score = 0; this.kills = 0; this.lifesteal = 0; this.runTime = 0;
     this.meleeArmor = 0; this.bonusCard = false; this.objectives.clear();
+    this.pickupReach = 3.2; this.dropMult = 1;
+    this.ranks = { firepower: 0, survival: 0, utility: 0 }; this.keystones.clear();
+    this.lastStandReady = this.barrierUp = false; this.spree = this.spreeT = this.fabT = 0;
     this.queue = []; this.clearT = 0; this.intermission = 2.5;
     this.state = 'playing';
     this.weapons.scene.visible = true;
@@ -333,6 +368,7 @@ export class Game {
 
   private nextWave() {
     this.wave++;
+    if (this.keystones.has('laststand')) this.lastStandReady = true;
     this.applyDifficulty();
     const w = this.wave, bossWave = w % 5 === 0;
     // Boss waves bring the Warden with a smaller escort.
@@ -406,28 +442,50 @@ export class Game {
 
   private offerUpgrades() {
     const offers: Upgrade[] = [];
-    // One weapon unlock is offered each wave until all are taken, earliest first.
+    const pick = (list: Upgrade[]) => list.splice((Math.random() * list.length) | 0, 1)[0];
+    const pools = TRACKS.map((t) => UPGRADES.filter((u) => u.track === t && (!u.ok || u.ok(this))));
+    // One card per track; a track that has reached its keystone rank offers its keystones instead.
+    TRACKS.forEach((t, i) => {
+      if (this.keystoneDue(t)) offers.push(...KEYSTONES.filter((k) => k.track === t));
+      else if (pools[i].length) offers.push(pick(pools[i]));
+    });
+    // Completing the wave's objective adds one more regular card from any track.
+    if (this.bonusCard) {
+      const rest = pools.flat();
+      if (rest.length) offers.push({ ...pick(rest), bonus: true });
+    }
+    this.bonusCard = false;
+    // One weapon unlock is offered each wave until all are taken, earliest first, as its own card.
     const locked = WEAPONS.map((w, i) => ({ w, i })).filter((o) => o.w.unlockWave !== undefined && !this.weapons.states[o.i].unlocked && this.wave >= o.w.unlockWave!)
       .sort((x, y) => x.w.unlockWave! - y.w.unlockWave!);
     if (locked.length) {
       const { w, i } = locked[0];
       offers.push({ name: w.name, weapon: true, desc: w.pitch ?? '', apply: (g) => g.weapons.unlock(i) });
     }
-    const pool = UPGRADES.filter((u) => !u.ok || u.ok(this));
-    const count = this.bonusCard ? 4 : 3;
-    this.bonusCard = false;
-    while (offers.length < count && pool.length) offers.push(pool.splice((Math.random() * pool.length) | 0, 1)[0]);
     this.offers = offers;
     this.state = 'upgrade';
     this.input.reset();
     this.touch?.show(false);
     if (document.pointerLockElement) document.exitPointerLock();
-    this.ui.showUpgrades(this.wave, offers as Card[]);
+    this.ui.showUpgrades(this.wave, offers.map((o): Card => ({
+      name: o.name, desc: o.desc, weapon: o.weapon, bonus: o.bonus, keystone: !!o.keystone, track: o.track,
+      rank: o.track ? Math.min(KEYSTONE_RANK, this.ranks[o.track]) : 0, keystoneRank: KEYSTONE_RANK,
+    })));
   }
+
+  /** True when a track has reached its keystone rank and no keystone has been chosen from it. */
+  private keystoneDue(t: Track): boolean {
+    return this.ranks[t] >= KEYSTONE_RANK && !KEYSTONES.some((k) => k.track === t && this.keystones.has(k.keystone!));
+  }
+
+  has(k: Keystone): boolean { return this.keystones.has(k); }
 
   private pickUpgrade(i: number) {
     if (this.state !== 'upgrade' || !this.offers[i]) return;
-    this.offers[i].apply(this);
+    const o = this.offers[i];
+    o.apply(this);
+    if (o.keystone) this.keystones.add(o.keystone);
+    else if (o.track) this.ranks[o.track]++;
     this.audio.upgrade();
     this.ui.feed(`<b>${this.offers[i].name}</b> installed`);
     this.offers = [];
@@ -464,8 +522,23 @@ export class Game {
 
   // ---------- combat callbacks ----------
   private hurtPlayer(amount: number, from: THREE.Vector3) {
-    if (this.state !== 'playing' || this.player.dead) return;
-    this.player.damage(amount);
+    const p = this.player;
+    if (this.state !== 'playing' || p.dead || p.invuln > 0) return;
+    if (this.barrierUp) {
+      // Kinetic barrier: the whole hit is absorbed, and the recharge timer restarts.
+      this.barrierUp = false;
+      p.sinceHit = 0;
+      p.shake = Math.min(1, p.shake + 0.2);
+      this.audio.meleeHit();
+      this.ui.feed('Barrier <b>absorbed a hit</b>');
+      return;
+    }
+    p.damage(amount);
+    if (p.dead && this.lastStandReady) {
+      p.health = 1; p.invuln = 2; this.lastStandReady = false;
+      this.ui.announce('LAST STAND', 'INVULNERABLE', 1.4);
+      this.audio.alarm();
+    }
     this.audio.hurt();
     this.ui.damageFlash(amount);
     const dx = from.x - this.player.pos.x, dz = from.z - this.player.pos.z;
@@ -535,13 +608,17 @@ export class Game {
       this.pickups.spawn(this.player.health < this.player.maxHealth * 0.6 ? PICKUP_HEALTH : PICKUP_AMMO, tmpA.set(e.pos.x, 0.5, e.pos.z));
     }
     if (this.lifesteal) this.player.health = Math.min(this.player.maxHealth, this.player.health + this.lifesteal);
+    if (this.has('spree')) { this.spree = Math.min(5, this.spree + 1); this.spreeT = 3; }
+    // Overload rounds: a weak-point kill by gunfire bursts. Blast kills are never weak-point
+    // kills, so this cannot chain.
+    if (crit && src === 'bullet' && this.has('overload')) this.explode(e.center(new THREE.Vector3()), 4.5, 85 * this.weapons.mods.damage, 0);
     const p = e.center(tmpC).clone();
     p.y = 0.5;
     if (e.type === 'boss') { this.boss = null; this.ui.announce(`${e.label.toUpperCase()} DESTROYED`, `+${pts}`, 2.5); }
     const drops = e.type === 'boss' ? 7 : e.type === 'heavy' ? 3 : 1;
     for (let i = 0; i < drops; i++) {
       const r = Math.random(), hurt = this.player.health < this.player.maxHealth * 0.5;
-      const k = this.diff.drops, hp = (hurt ? 0.2 : 0.09) * k;
+      const k = this.diff.drops * this.dropMult, hp = (hurt ? 0.2 : 0.09) * k;
       let kind = -1;
       if (r < hp) kind = PICKUP_HEALTH;
       else if (r < hp + 0.17 * k) kind = PICKUP_AMMO;
@@ -618,12 +695,42 @@ export class Game {
     this.effects.setViewport(this.renderer.domElement.height, this.camera.fov);
   }
 
+  /** Timers for keystones that tick on their own. */
+  private updateKeystones(dt: number) {
+    const p = this.player, w = this.weapons;
+    if (this.spree > 0) { this.spreeT -= dt; if (this.spreeT <= 0) this.spree = 0; }
+    w.boost = 1 + 0.1 * this.spree;
+    if (this.has('barrier') && !this.barrierUp && p.sinceHit >= 6) {
+      this.barrierUp = true;
+      this.audio.pickup(PICKUP_ARMOR);
+      this.ui.feed('Barrier <b>recharged</b>');
+    }
+    if (this.has('fabricator')) {
+      if (w.grenades >= w.maxGrenades) this.fabT = 0;
+      else if ((this.fabT += dt) >= 20) { this.fabT = 0; w.grenades++; this.audio.pickup(PICKUP_GRENADE); this.ui.feed('Grenade <b>fabricated</b>'); }
+    }
+  }
+
+  /** Short HUD line for keystones with a live state. */
+  private perkStatus(): string {
+    const out: string[] = [];
+    if (this.has('barrier')) out.push(this.barrierUp ? 'BARRIER READY' : 'BARRIER CHARGING');
+    if (this.has('laststand')) out.push(this.lastStandReady ? 'LAST STAND READY' : 'LAST STAND USED');
+    if (this.spree > 0) out.push(`SPREE ×${this.spree}`);
+    return out.join('  ·  ');
+  }
+
   private simulate(dt: number) {
     const p = this.player, w = this.weapons, input = this.input;
     this.runTime += dt;
     if (input.wasPressed('pause')) { this.pause(); return; }
 
     p.update(dt, input, this.settings, w.ads, w.wantsFire, w.def.zoom);
+    if (p.slideStarted && this.has('combatslide')) {
+      w.instantReload(this.audio);
+      p.invuln = Math.max(p.invuln, 0.6);
+    }
+    this.updateKeystones(dt);
     const e = w.ads * w.ads * (3 - 2 * w.ads);
     const base = this.settings.fov + (p.sprinting ? 4 : p.sliding ? 7 : 0);
     // Zoom is applied to the tangent so it feels the same at any base FOV.
@@ -648,7 +755,7 @@ export class Game {
 
     this.enemies.update(dt, this.enemyCtx);
     this.projectiles.update(dt, this.projCtx);
-    this.pickups.update(dt, p, (k) => this.collect(k));
+    this.pickups.update(dt, p, (k) => this.collect(k), this.pickupReach);
     this.shockwaves.update(dt, p, (a, from) => this.hurtPlayer(a, from));
     const res = this.objectives.update(dt, p);
     if (res === 'done') this.objectiveDone();
@@ -683,7 +790,7 @@ export class Game {
       health: p.health, maxHealth: p.maxHealth, armor: p.armor, maxArmor: p.maxArmor, wave: Math.max(1, this.wave),
       remaining: this.enemies.list.length + this.queue.length, score: this.score, weapons: w, spreadPx, ads: w.ads,
       sprinting: p.sprinting, fps: this.fps, intermission: this.intermission,
-      best: this.best,
+      best: this.best, perks: this.perkStatus(),
       boss: this.boss && this.boss.alive ? this.boss.hp / this.boss.maxHp : -1, bossName: this.boss ? this.boss.label : '',
     });
     const sy = Math.sin(p.yaw), cy = Math.cos(p.yaw), blips: RadarBlip[] = [];

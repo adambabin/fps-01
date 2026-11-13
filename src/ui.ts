@@ -7,7 +7,14 @@ import { ARENAS, type ArenaId } from './world';
 const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
 
 export type Screen = 'menu' | 'pause' | 'settings' | 'upgrade' | 'gameover' | 'scores';
-export interface Card { name: string; desc: string; weapon?: boolean; }
+export interface Card {
+  name: string; desc: string; weapon?: boolean; bonus?: boolean; keystone?: boolean;
+  /** Track the card belongs to, its current rank, and the rank at which keystones unlock. */
+  track?: string; rank?: number; keystoneRank?: number;
+}
+
+/** Cards ignore clicks for this long, so a click already in progress cannot pick one. */
+const CARD_ARM_MS = 600;
 
 export interface UICallbacks {
   play(): void; resume(): void; restart(): void; quit(): void;
@@ -196,13 +203,24 @@ export class UI {
     $('upgrade-kicker').textContent = `WAVE ${wave} CLEARED`;
     const el = $('cards');
     el.innerHTML = '';
+    const armed = performance.now() + CARD_ARM_MS;
+    el.classList.add('arming');
+    setTimeout(() => el.classList.remove('arming'), CARD_ARM_MS);
     cards.forEach((c, i) => {
       const b = document.createElement('button');
-      b.className = 'card' + (c.weapon ? ' weapon' : '');
-      b.innerHTML = `<span class="num">${i + 1}</span><span class="name"></span><span class="desc"></span>`;
+      b.className = 'card' + (c.weapon ? ' weapon' : '') + (c.keystone ? ' keystone' : '') + (c.track ? ' t-' + c.track : '');
+      b.innerHTML = `<span class="num"></span><span class="name"></span><span class="desc"></span>`;
+      const head = b.children[0] as HTMLElement;
+      if (c.weapon) head.textContent = 'NEW WEAPON';
+      else if (c.keystone) head.textContent = `${c.track!.toUpperCase()} KEYSTONE`;
+      else if (c.track) {
+        // Pips: ranks already taken in this track, ending in the keystone marker.
+        const n = c.keystoneRank ?? 3, r = c.rank ?? 0;
+        head.innerHTML = `${c.track.toUpperCase()}${c.bonus ? ' · BONUS' : ''} <span class="pips">${'●'.repeat(r)}${'○'.repeat(Math.max(0, n - r))}◆</span>`;
+      }
       (b.children[1] as HTMLElement).textContent = c.name;
       (b.children[2] as HTMLElement).textContent = c.desc;
-      b.addEventListener('click', () => this.cb.pickUpgrade(i));
+      b.addEventListener('click', () => { if (performance.now() >= armed) this.cb.pickUpgrade(i); });
       el.append(b);
     });
     this.show('upgrade');
@@ -282,7 +300,9 @@ export class UI {
   update(dt: number, d: {
     health: number; maxHealth: number; armor: number; maxArmor: number; wave: number; remaining: number; score: number;
     weapons: WeaponSystem; spreadPx: number; ads: number; sprinting: boolean; fps: number; intermission: number; boss: number; bossName: string; best: number;
+    perks: string;
   }) {
+    this.set('perks', d.perks);
     this.set('score-best', d.best <= 0 ? '' : d.score > d.best ? 'NEW BEST' : 'BEST ' + d.best.toLocaleString());
     $('score-best').classList.toggle('beaten', d.best > 0 && d.score > d.best);
     if (d.boss >= 0) { this.set('boss-name', d.bossName.toUpperCase()); this.set('np-name', d.bossName.toUpperCase()); $('np-fill').style.width = Math.max(0, d.boss) * 100 + '%'; }

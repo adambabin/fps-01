@@ -266,7 +266,7 @@ export class Pickups {
   clear() { for (const p of this.list) { p.active = false; p.group.visible = false; } }
 
   /** `collect` returns false when the player has no use for the pickup. */
-  update(dt: number, player: Player, collect: (kind: number) => boolean) {
+  update(dt: number, player: Player, collect: (kind: number) => boolean, reach = 3.2) {
     this.t += dt;
     for (const p of this.list) {
       if (!p.active) continue;
@@ -276,7 +276,7 @@ export class Pickups {
       g.position.y = p.baseY + Math.sin(this.t * 3 + g.position.x) * 0.08;
       g.visible = p.life > 4 || Math.floor(p.life * 6) % 2 === 0;
       const dx = player.pos.x - g.position.x, dz = player.pos.z - g.position.z, d = Math.hypot(dx, dz);
-      if (d < 3.2 && d > 0.01) { g.position.x += (dx / d) * dt * 7; g.position.z += (dz / d) * dt * 7; }
+      if (d < reach && d > 0.01) { const v = 7 * Math.max(1, reach / 3.2); g.position.x += (dx / d) * dt * v; g.position.z += (dz / d) * dt * v; }
       if (d < 1.1 && Math.abs(player.pos.y + 0.9 - g.position.y) < 1.8 && collect(p.kind)) p.life = 0;
       if (p.life <= 0) { p.active = false; g.visible = false; }
     }

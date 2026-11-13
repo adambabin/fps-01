@@ -60,7 +60,7 @@ export const WEAPONS: WeaponDef[] = [
 
 export interface WeaponState { ammo: number; reserve: number; unlocked: boolean; }
 
-export interface Mods { damage: number; fireRate: number; mag: number; reload: number; crit: number; reserve: number; melee: number; }
+export interface Mods { damage: number; fireRate: number; mag: number; reload: number; crit: number; reserve: number; melee: number; handling: number; }
 
 export interface FireCtx {
   world: CollisionWorld; enemies: EnemyManager; effects: Effects; audio: AudioSys;
@@ -90,7 +90,9 @@ export class WeaponSystem {
   reloadDur = 1;
   grenades = 2;
   maxGrenades = 2;
-  mods: Mods = { damage: 1, fireRate: 1, mag: 1, reload: 1, crit: 1, reserve: 1, melee: 1 };
+  mods: Mods = { damage: 1, fireRate: 1, mag: 1, reload: 1, crit: 1, reserve: 1, melee: 1, handling: 1 };
+  /** Temporary fire-rate and reload multiplier (Killing spree). */
+  boost = 1;
   /** True on frames where the trigger is held or buffered. */
   wantsFire = false;
   /** Counts down through a melee swing; the hit lands part-way through. */
@@ -141,7 +143,7 @@ export class WeaponSystem {
 
   reset() {
     this.states = WEAPONS.map((w, i) => ({ ammo: w.mag, reserve: w.reserve, unlocked: i < 2 }));
-    this.mods = { damage: 1, fireRate: 1, mag: 1, reload: 1, crit: 1, reserve: 1, melee: 1 };
+    this.mods = { damage: 1, fireRate: 1, mag: 1, reload: 1, crit: 1, reserve: 1, melee: 1, handling: 1 }; this.boost = 1;
     this.current = 1; this.pending = -1; this.switchT = 0;
     this.reloadT = 0; this.cooldown = 0; this.heat = 0; this.ads = 0; this.adsHeld = false; this.meleeT = 0;
     this.grenades = this.maxGrenades = 2;
@@ -175,7 +177,8 @@ export class WeaponSystem {
     if (i === this.current && this.pending < 0) return;
     if (i < 0 || i >= WEAPONS.length || !this.states[i].unlocked) return;
     this.pending = i;
-    if (this.switchT <= 0) this.switchT = 0.36;
+    // Past the halfway point the swap has already happened, so a new choice restarts it.
+    if (this.switchT <= 0.18) this.switchT = 0.36;
     this.reloadT = 0;
   }
 
@@ -192,6 +195,16 @@ export class WeaponSystem {
     if (this.reloadT > 0 || this.switchT > 0 || s.ammo >= this.magSize() || s.reserve <= 0) return;
     this.reloadDur = this.reloadT = this.def.reload * this.mods.reload;
     audio.reload(this.reloadDur);
+  }
+
+  /** Fills the current magazine from reserve at once (Combat slide). */
+  instantReload(audio: AudioSys) {
+    const s = this.state, take = Math.min(this.magSize() - s.ammo, s.reserve);
+    this.reloadT = 0;
+    if (take <= 0 || this.switchT > 0) return;
+    s.ammo += take;
+    if (isFinite(s.reserve)) s.reserve -= take;
+    audio.reload(0.15);
   }
 
   update(dt: number, input: Input, settings: Settings, player: Player, c: FireCtx) {
@@ -214,7 +227,7 @@ export class WeaponSystem {
 
     if (this.switchT > 0) {
       const before = this.switchT;
-      this.switchT -= dt;
+      this.switchT -= dt * this.mods.handling;
       if (before > 0.18 && this.switchT <= 0.18 && this.pending >= 0) {
         this.guns[this.current].group.visible = false;
         this.current = this.pending; this.pending = -1;
@@ -242,13 +255,13 @@ export class WeaponSystem {
     else this.adsHeld = input.isDown('ads');
     if (player.sprinting && settings.adsToggle) this.adsHeld = false;
     const wantAds = this.adsHeld && !this.reloading && !busy;
-    const rate = dt / this.def.adsTime;
+    const rate = (dt / this.def.adsTime) * this.mods.handling;
     this.ads = Math.max(0, Math.min(1, this.ads + (wantAds ? rate : -rate)));
 
     // Reload
     if (input.wasPressed('reload')) this.startReload(c.audio);
     if (this.reloadT > 0) {
-      this.reloadT -= dt;
+      this.reloadT -= dt * this.boost;
       if (this.reloadT <= 0) {
         const need = this.magSize() - st.ammo, take = Math.min(need, st.reserve);
         st.ammo += take;
@@ -257,7 +270,7 @@ export class WeaponSystem {
     }
 
     // Fire
-    this.cooldown -= dt;
+    this.cooldown -= dt * this.boost;
     if (input.wasPressed('fire')) this.fireBuf = 0.12; else this.fireBuf -= dt;
     const trigger = def.auto ? input.isDown('fire') : this.fireBuf > 0;
     this.wantsFire = trigger || input.isDown('fire');

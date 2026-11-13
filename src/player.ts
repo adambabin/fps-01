@@ -34,6 +34,13 @@ export class Player {
   private sdx = 0;
   private sdz = 0;
   height = STAND;
+  /** Seconds of immunity left (Last stand, Combat slide). */
+  invuln = 0;
+  /** Extra mid-air jumps allowed (Double jump), and how many remain before landing. */
+  airJumps = 0;
+  private airLeft = 0;
+  /** True on the frame a slide begins. */
+  slideStarted = false;
   /** Seconds since the last hit taken. */
   sinceHit = 99;
   shake = 0;
@@ -58,6 +65,7 @@ export class Player {
     this.speedMult = 1; this.regen = 0; this.sinceHit = 99; this.shake = 0;
     this.crouching = false; this.height = STAND; this.crouchT = 0; this.landDip = 0;
     this.sliding = false; this.slideCd = 0;
+    this.invuln = 0; this.airJumps = this.airLeft = 0; this.slideStarted = false;
   }
 
   get eye(): number { return 1.62 + (1.0 - 1.62) * this.crouchT - this.landDip; }
@@ -91,11 +99,14 @@ export class Player {
     // Slide: crouch while sprinting. Carries momentum, keeps a low profile, and can be
     // cancelled into a jump.
     this.slideCd -= dt;
+    this.slideStarted = false;
+    this.invuln = Math.max(0, this.invuln - dt);
     if (input.wasPressed('crouch') && this.sprinting && this.grounded && this.slideCd <= 0) {
       const hs0 = Math.hypot(this.vel.x, this.vel.z) || 1;
       this.sliding = true; this.slideT = 0.85;
       this.sdx = this.vel.x / hs0; this.sdz = this.vel.z / hs0;
       this.slideSpeed = Math.max(hs0, SPRINT * this.speedMult) * 1.38;
+      this.slideStarted = true;
       this.audio.slide();
     }
 
@@ -154,8 +165,12 @@ export class Player {
     // Jump with a little buffering and coyote time so it never feels dropped.
     this.coyote = this.grounded ? 0.1 : this.coyote - dt;
     this.jumpBuf = input.wasPressed('jump') ? 0.12 : this.jumpBuf - dt;
+    if (this.grounded) this.airLeft = this.airJumps;
     if (this.jumpBuf > 0 && this.coyote > 0) {
       this.vel.y = JUMP; this.grounded = false; this.coyote = 0; this.jumpBuf = 0;
+      this.audio.jump();
+    } else if (this.jumpBuf > 0 && !this.grounded && this.airLeft > 0) {
+      this.vel.y = JUMP * 0.92; this.airLeft--; this.jumpBuf = 0; this.sliding = false;
       this.audio.jump();
     }
     this.vel.y -= GRAVITY * dt;

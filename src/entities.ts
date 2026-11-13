@@ -178,6 +178,8 @@ interface Pickup { kind: number; group: THREE.Group; life: number; active: boole
 export class Pickups {
   private list: Pickup[] = [];
   private t = 0;
+  /** While true, pickups on the floor do not expire (the break before an arena change). */
+  hold = false;
 
   constructor(scene: THREE.Scene) {
     const glow = (r: number, g: number, b: number) => { const m = new THREE.MeshBasicMaterial(); m.color.setRGB(r, g, b); return m; };
@@ -270,7 +272,7 @@ export class Pickups {
     this.t += dt;
     for (const p of this.list) {
       if (!p.active) continue;
-      p.life -= dt;
+      if (!this.hold) p.life -= dt;
       const g = p.group;
       g.rotation.y += dt * 1.8;
       g.position.y = p.baseY + Math.sin(this.t * 3 + g.position.x) * 0.08;

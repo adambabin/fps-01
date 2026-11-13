@@ -26,6 +26,7 @@ const BUTTONS: { action: Action; label: string; cls: string }[] = [
   { action: 'melee', label: 'MELEE', cls: 'melee' },
   { action: 'nextWeapon', label: 'SWAP', cls: 'swap' },
   { action: 'pause', label: '❚❚', cls: 'pause' },
+  { action: 'ready', label: 'NEXT ARENA', cls: 'ready' },
 ];
 
 /**
@@ -66,6 +67,9 @@ export class TouchControls {
     this.root.classList.toggle('hidden', !on);
     if (!on) this.release();
   }
+
+  /** Shows the button that starts the next wave while the game waits before an arena change. */
+  showReady(on: boolean) { this.root.classList.toggle('waiting', on); }
 
   /** Lets go of everything, e.g. when the game pauses mid-touch. */
   release() {

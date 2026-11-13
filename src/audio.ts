@@ -228,6 +228,25 @@ export class AudioSys {
     this.tone({ gain: 0.2 * s.g, dur: 0.04, freq: 1400, type: 'square', pan: s.pan });
   }
 
+  private weatherGain: GainNode | null = null;
+  private weatherFilter: BiquadFilterNode | null = null;
+
+  /** Looping rain hiss or wind for outdoor arenas; 'none' fades it out. */
+  setWeather(kind: 'none' | 'rain' | 'snow') {
+    const ctx = this.ctx; if (!ctx) return;
+    if (!this.weatherGain) {
+      const src = ctx.createBufferSource(); src.buffer = this.noiseBuf; src.loop = true;
+      this.weatherFilter = ctx.createBiquadFilter();
+      this.weatherGain = ctx.createGain(); this.weatherGain.gain.value = 0;
+      src.connect(this.weatherFilter).connect(this.weatherGain).connect(this.master);
+      src.start();
+    }
+    const f = this.weatherFilter!, t = ctx.currentTime;
+    if (kind === 'rain') { f.type = 'highpass'; f.frequency.setTargetAtTime(2200, t, 0.3); f.Q.value = 0.3; }
+    else { f.type = 'bandpass'; f.frequency.setTargetAtTime(420, t, 0.3); f.Q.value = 0.6; }
+    this.weatherGain.gain.setTargetAtTime(kind === 'rain' ? 0.09 : kind === 'snow' ? 0.07 : 0, t, 0.6);
+  }
+
   /** Low machinery drone under everything. */
   startAmbient() {
     const ctx = this.ctx; if (!ctx || this.ambient) return;

@@ -1,3 +1,5 @@
+import type { ArenaId } from './world';
+
 export const ACTIONS = [
   'forward', 'back', 'left', 'right', 'jump', 'sprint', 'crouch',
   'fire', 'ads', 'reload', 'grenade', 'melee',
@@ -34,7 +36,9 @@ export interface Settings {
   fov: number;
   quality: Quality;
   difficulty: Difficulty;
-  arena: 'reactor' | 'foundry' | 'vault';
+  arena: ArenaId;
+  /** Move to the next arena after each boss is destroyed. */
+  rotate: boolean;
   volume: number;
   adsToggle: boolean;
   scrollSwitch: boolean;
@@ -57,7 +61,7 @@ export function defaultBinds(): Record<Action, string[]> {
 
 export function defaults(): Settings {
   return {
-    sensitivity: 1.0, adsSensitivity: 1.0, invertY: false, fov: 75, quality: 'medium', difficulty: 'normal', arena: 'reactor',
+    sensitivity: 1.0, adsSensitivity: 1.0, invertY: false, fov: 75, quality: 'medium', difficulty: 'normal', arena: 'reactor', rotate: true,
     volume: 0.7, adsToggle: false, scrollSwitch: true, rawInput: true, showFps: false,
     damageNumbers: true, binds: defaultBinds(),
   };

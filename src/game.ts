@@ -16,7 +16,7 @@ import { Player } from './player';
 import { DIFFICULTY, loadHighScore, loadSettings, saveHighScore, saveScore, type Settings } from './settings';
 import { UI, type Card, type RadarBlip } from './ui';
 import { WEAPONS, WeaponSystem, type FireCtx } from './weapons';
-import { ARENAS, CEIL, World } from './world';
+import { ARENAS, ARENA_ORDER, CEIL, World, type ArenaId } from './world';
 
 type State = 'menu' | 'playing' | 'paused' | 'upgrade' | 'dead';
 
@@ -253,13 +253,30 @@ export class Game {
   private syncArena() {
     if (this.world.current === this.settings.arena) return;
     this.enemies.clear(); this.projectiles.clear(); this.pickups.clear(); this.effects.clear(); this.shockwaves.clear(); this.boss = null;
-    this.world.load(this.settings.arena);
+    this.loadArena(this.settings.arena);
+  }
+
+  private loadArena(id: ArenaId) {
+    this.world.load(id);
     this.nav.rebuild(this.world.collision);
+    this.audio.setWeather(this.world.weather);
+  }
+
+  /** After a boss, move the run to the next arena in the rotation. */
+  private travel() {
+    const next = ARENA_ORDER[(ARENA_ORDER.indexOf(this.world.current!) + 1) % ARENA_ORDER.length];
+    this.enemies.clear(); this.projectiles.clear(); this.pickups.clear(); this.effects.clear(); this.shockwaves.clear(); this.boss = null;
+    this.loadArena(next);
+    this.player.pos.set(0, 0, 9); this.player.vel.set(0, 0, 0); this.player.yaw = Math.PI; this.player.pitch = 0;
+    this.ui.fade();
+    this.ui.announce(ARENAS[next].name.toUpperCase(), 'NEW ARENA', 3);
   }
 
   startRun() {
     this.audio.unlock();
-    this.syncArena();
+    // A run that rotated arenas must start again from the chosen one.
+    if (this.world.current !== this.settings.arena) this.syncArena();
+    this.audio.setWeather(this.world.weather);
     this.audio.startAmbient();
     this.enemies.clear(); this.projectiles.clear(); this.pickups.clear(); this.effects.clear(); this.shockwaves.clear(); this.boss = null;
     this.player.reset(); this.weapons.reset();
@@ -294,6 +311,7 @@ export class Game {
   private toMenu() {
     this.state = 'menu';
     this.objectives.clear(); this.ui.objective(null, null);
+    this.syncArena(); this.audio.setWeather(this.world.weather);
     this.enemies.clear(); this.projectiles.clear(); this.pickups.clear(); this.effects.clear(); this.shockwaves.clear(); this.boss = null;
     this.weapons.scene.visible = false;
     this.ui.showHud(false); this.ui.show('menu');
@@ -403,6 +421,7 @@ export class Game {
     this.intermission = 3.5;
     this.state = 'playing';
     this.ui.show(null);
+    if (this.settings.rotate && this.wave % 5 === 0) { this.travel(); this.intermission = 5; }
     this.requestLock();
   }
 
@@ -414,7 +433,7 @@ export class Game {
     const best = loadHighScore();
     if (this.score > best) saveHighScore(this.score);
     const date = Date.now();
-    const rank = saveScore({ score: this.score, wave: this.wave, kills: this.kills, time: Math.round(this.runTime), arena: ARENAS[this.settings.arena].name, difficulty: this.diff.label, date });
+    const rank = saveScore({ score: this.score, wave: this.wave, kills: this.kills, time: Math.round(this.runTime), arena: ARENAS[this.settings.arena].name + (this.settings.rotate && this.wave > 5 ? ' +' : ''), difficulty: this.diff.label, date });
     this.ui.lastRun = date;
     const m = Math.floor(this.runTime / 60), s = Math.floor(this.runTime % 60);
     setTimeout(() => {
@@ -554,7 +573,7 @@ export class Game {
     this.fps += (1 / Math.max(raw, 0.001) - this.fps) * 0.05;
     const dt = Math.min(raw, 0.05);
     this.time += dt;
-    this.world.update(this.time);
+    this.world.update(this.time, dt, this.camera.position);
 
     if (this.state === 'playing' && this.locked()) this.simulate(dt);
     else if (this.state === 'playing') this.ui.announce('CLICK TO CONTINUE', 'MOUSE NOT CAPTURED', 0.3);

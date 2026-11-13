@@ -62,6 +62,9 @@ export class UI {
       ar.append(b);
     }
     $('arena-blurb').textContent = ARENAS[this.settings.arena]?.blurb ?? '';
+    const rot = $<HTMLInputElement>('rotate');
+    rot.checked = this.settings.rotate;
+    rot.onchange = () => { this.settings.rotate = rot.checked; this.commit(); };
     const el = $('difficulty');
     el.innerHTML = '';
     for (const d of Object.keys(DIFFICULTY) as Difficulty[]) {
@@ -319,6 +322,14 @@ export class UI {
     $('lowhp').style.opacity = low < 0.35 ? ((0.35 - low) / 0.35 * (0.6 + Math.sin(performance.now() * 0.006) * 0.25)).toFixed(2) : '0';
     if (this.announceT > 0) { this.announceT -= dt; if (this.announceT <= 0) $('announce').style.opacity = '0'; }
     $('fps').textContent = this.settings.showFps ? d.fps.toFixed(0) + ' FPS' : '';
+  }
+
+  /** Brief fade from black, used when the arena changes mid-run. */
+  fade() {
+    const el = $('fade');
+    el.classList.remove('go');
+    void el.offsetWidth;
+    el.classList.add('go');
   }
 
   /** Positions the boss's floating name and health bar, or hides it. */

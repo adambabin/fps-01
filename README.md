@@ -41,7 +41,9 @@ scroll-to-switch. Every binding can be changed in Settings.
   spread bloom, damage falloff, reloads, aim-down-sights and weak-point multipliers, plus grenades.
 - Four robots: melee Scuttler, ranged Trooper, flying Drone and rocket-firing Juggernaut,
   steered by a shared flow field so they path around cover.
-- Three arenas (Reactor Hall, Foundry, Server Vault) and a boss, the Warden, every fifth wave.
+- Five arenas: Reactor Hall, Foundry and Server Vault indoors; Rain Yard and Frost Outpost outdoors with
+  weather. By default the run moves to the next arena after each boss.
+- A named boss every fifth wave (roster in `src/bosses.ts`) and a local scoreboard of your best runs.
 - Melee strike, sprint-slide, and one optional side objective per wave that pays out a supply drop
   and an extra upgrade choice.
 - Wave director, score, pickups (health, armor, ammo, grenades) and 12 stackable upgrades.

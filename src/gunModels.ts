@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { Rig, box, cable, cyl, prismX, torus, tube, type Finish, type V3 } from './modelkit';
+import { Rig, box, cable, cyl, prismX, sphere, torus, tube, type Finish, type V3 } from './modelkit';
 import { makeSurface } from './textures';
 
 const metalMaps = makeSurface({ seed: 91, color: [255, 255, 255], panels: 0, roughness: 0.4, wear: 1.3, bump: 2 }, 256);
@@ -17,6 +17,7 @@ const FIN: Record<string, Finish> = {
   black: { mat: 'metal', color: 0x2b2f35 }, steel: { mat: 'metal', color: 0x8c939b }, dark: { mat: 'metal', color: 0x0c0d0f },
   brass: { mat: 'metal', color: 0xb08a3a }, plate: { mat: 'metal', color: 0x4a5058 },
   poly: { mat: 'poly', color: 0x1b1d20 }, rubber: { mat: 'poly', color: 0x0d0e0f }, shell: { mat: 'poly', color: 0x9a2219 },
+  olive: { mat: 'poly', color: 0x4b5531 }, yellow: { mat: 'poly', color: 0xc9a227 },
   glove: { mat: 'poly', color: 0x1a1b1d }, sleeve: { mat: 'poly', color: 0x2f3a34 }, pad: { mat: 'poly', color: 0x3a3f45 },
   glass: { mat: 'glass', color: 0xffffff }, red: { mat: 'red', color: 0xffffff }, green: { mat: 'green', color: 0xffffff }, cyan: { mat: 'cyan', color: 0xffffff },
 };
@@ -78,8 +79,9 @@ export interface GunModel {
 
 /**
  * How a gun reloads. Offsets are in model space, relative to the support hand's rest pose.
- * `mag`: drop the magazine and seat a fresh one; `shells`: load rounds one at a time;
- * `cylinder`: swing the cylinder out, load it and snap it shut.
+ * `mag`: drop the magazine and seat a fresh one; `shells`: load shells one at a time;
+ * `cylinder`: swing the cylinder out, load rounds one at a time and snap it shut.
+ * Round-by-round styles (`ROUND_BY_ROUND` in weapons.ts) can be cut short by firing.
  */
 export interface ReloadSpec {
   style: 'mag' | 'shells' | 'cylinder';
@@ -91,6 +93,54 @@ export interface ReloadSpec {
   tilt: [number, number];
   /** How far the gun is brought up and in towards the centre, in view space. */
   lift?: V3;
+}
+
+/**
+ * A frag grenade at real size, centred on its body: olive body with a seam and a yellow band,
+ * fuze, spoon along the side, a small glowing arming light, and the pin and ring (node `pin`).
+ */
+function grenadeParts(r: Rig, node: string, pin: string) {
+  const body = sphere(0.032, 18); body.scale(1, 1.15, 1);
+  r.add(node, 'olive', body)
+    .add(node, 'rubber', cyl(0.0326, 0.004, 'y', 20))
+    .add(node, 'yellow', cyl(0.0285, 0.005, 'y', 20), { p: [0, 0.022, 0] })
+    .add(node, 'steel', cyl(0.011, 0.016), { p: [0, 0.042, 0] })
+    .add(node, 'black', cyl(0.0085, 0.006), { p: [0, 0.052, 0] })
+    // Spoon: across the top, then down the side of the body.
+    .add(node, 'steel', box(0.012, 0.003, 0.03, 0.001), { p: [0, 0.056, 0.012] })
+    .add(node, 'steel', box(0.012, 0.05, 0.003, 0.001), { p: [0, 0.03, 0.03], r: [-0.3, 0, 0] })
+    .add(node, 'red', sphere(0.004, 8), { p: [0, 0.047, -0.011] });
+  r.add(pin, 'steel', cyl(0.0016, 0.03, 'x', 6), { p: [-0.006, 0.044, 0.002] })
+    .add(pin, 'steel', torus(0.011, 0.0017, 'z', 16), { p: [-0.031, 0.044, 0.002] });
+}
+
+/** A grenade model for the world (thrown grenades and pickups). */
+export function grenadeModel(): THREE.Group {
+  const r = rig();
+  r.node('pin', 'root');
+  grenadeParts(r, 'root', 'pin');
+  const g = r.bake();
+  g.traverse((o) => { o.castShadow = true; });
+  return g;
+}
+
+export interface ThrowArm { group: THREE.Group; nade: THREE.Object3D; pin: THREE.Object3D; }
+
+/** Right arm holding a grenade, for the throw animation. The grenade body sits at the origin. */
+export function throwArm(): ThrowArm {
+  const r = rig();
+  r.node('nade', 'root').node('pin', 'nade');
+  grenadeParts(r, 'nade', 'pin');
+  // Palm behind the grenade, fingers curled over the front, thumb pinning the spoon.
+  r.add('root', 'glove', box(0.05, 0.062, 0.03, 0.012), { p: [0.014, -0.006, 0.04], r: [0.15, 0, 0] });
+  for (let i = 0; i < 4; i++) {
+    r.add('root', 'glove', box(0.044, 0.016, 0.018, 0.007), { p: [0.008, 0.016 - i * 0.017, -0.03 + i * 0.003], r: [0, 0.2, 0] })
+      .add('root', 'glove', box(0.016, 0.016, 0.04, 0.006), { p: [0.032, 0.016 - i * 0.017, -0.006 + i * 0.003] });
+  }
+  r.add('root', 'glove', box(0.016, 0.015, 0.032, 0.006), { p: [-0.002, 0.05, 0.034], r: [0.55, 0, 0] });
+  forearm(r, 'root', [0.024, -0.03, 0.06], [0.16, -0.32, 0.36]);
+  const group = r.bake();
+  return { group, nade: group.getObjectByName('nade')!, pin: group.getObjectByName('pin')! };
 }
 
 function pistol(): GunModel {
@@ -298,7 +348,7 @@ function smg(): GunModel {
 
 function launcher(): GunModel {
   const r = rig();
-  r.node('mag', 'root').node('off', 'root');
+  r.node('mag', 'root').node('off', 'root').node('held', 'off');
   r.add('root', 'plate', cyl(0.031, 0.36, 'z', 16), { p: [0, 0.02, -0.33] })
     .add('root', 'dark', cyl(0.025, 0.362, 'z', 16), { p: [0, 0.02, -0.331] })
     .add('root', 'black', cyl(0.035, 0.03, 'z', 16), { p: [0, 0.02, -0.5] })
@@ -328,9 +378,12 @@ function launcher(): GunModel {
   }
   gripHand(r, 'root', -0.088, 0.105);
   supportHand(r, 'off', -0.048, -0.3, 0.023);
+  // A round held in the fingertips while loading the cylinder.
+  r.add('held', 'plate', cyl(0.0155, 0.05, 'z', 10), { p: [0, -0.016, -0.325] })
+    .add('held', 'brass', cyl(0.016, 0.012, 'z', 10), { p: [0, -0.016, -0.294] });
   const node = (n: string) => r.root.getObjectByName(n)!;
   return {
-    group: r.bake(), muzzle: new THREE.Vector3(0, 0.02, -0.53), sightY: 0.102, mag: node('mag'), off: node('off'),
+    group: r.bake(), muzzle: new THREE.Vector3(0, 0.02, -0.53), sightY: 0.102, mag: node('mag'), off: node('off'), held: node('held'),
     reload: { style: 'cylinder', reach: [-0.08, 0.03, 0.2], tilt: [0.12, -0.55] },
   };
 }

@@ -257,6 +257,13 @@ export class Game {
       hitEnemy: (e, dmg, crit, point, dir) => this.hitEnemy(e, dmg, crit, point, dir),
       launch: (pos, vel, dmg) => this.projectiles.spawn('shell', pos, vel, dmg),
       melee: (dmg) => this.melee(dmg),
+      throwGrenade: () => {
+        const p = this.player, w = this.weapons;
+        this.camera.getWorldDirection(tmpA);
+        tmpB.copy(this.camera.position).addScaledVector(tmpA, 0.5); tmpB.y -= 0.15;
+        tmpA.multiplyScalar(17); tmpA.y += 4; tmpA.addScaledVector(p.vel, 0.5);
+        this.projectiles.spawn('grenade', tmpB, tmpA, 240 * w.mods.damage);
+      },
     };
 
     if (isTouchDevice()) {
@@ -908,13 +915,6 @@ export class Game {
 
     w.update(dt, input, this.settings, p, this.fireCtx);
 
-    if (input.wasPressed('grenade') && w.useGrenade()) {
-      this.camera.getWorldDirection(tmpA);
-      tmpB.copy(this.camera.position).addScaledVector(tmpA, 0.5); tmpB.y -= 0.15;
-      tmpA.multiplyScalar(17); tmpA.y += 4; tmpA.addScaledVector(p.vel, 0.5);
-      this.projectiles.spawn('grenade', tmpB, tmpA, 240 * w.mods.damage);
-      this.audio.swap();
-    }
 
     // Pathfinding refresh
     this.navT -= dt;

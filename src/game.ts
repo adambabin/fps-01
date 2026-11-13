@@ -146,6 +146,11 @@ export class Game {
   private pausedAt = 0;
   /** True while a raw-input pointer-lock request may still be retried in the default mode. */
   private lockRetry = false;
+  /** A capture request is waiting for the browser's answer. */
+  private lockPending = false;
+  /** When the current stretch of play without mouse capture began (0 = not counting), and whether the prompt is showing. */
+  private unlockedSince = 0;
+  private promptShown = false;
   /** Phones and tablets: no pointer lock, on-screen controls instead. */
   private touch: TouchControls | null = null;
 
@@ -210,6 +215,8 @@ export class Game {
     }
     this.input.lookActive = () => this.state === 'playing' && this.locked();
     document.addEventListener('pointerlockchange', () => {
+      this.lockPending = false; this.unlockedSince = 0;
+      if (this.locked() && this.promptShown) { this.promptShown = false; this.ui.clearAnnounce(); }
       if (!this.locked() && this.state === 'playing') this.pause();
     });
     document.addEventListener('pointerlockerror', () => { if (!this.lockRetry && this.state === 'playing' && !this.locked()) this.pause(); });
@@ -239,16 +246,17 @@ export class Game {
   private requestLock() {
     if (this.touch) { this.touch.show(true); return; }
     if (this.test) return;
-    const fail = () => { this.lockRetry = false; if (this.state === 'playing' && !this.locked()) this.pause(); };
+    this.lockPending = true;
+    const fail = () => { this.lockRetry = false; this.lockPending = false; if (this.state === 'playing' && !this.locked()) this.pause(); };
     try {
       const raw = this.settings.rawInput;
       // While the raw-input attempt is pending, its error event must not pause the game.
       this.lockRetry = raw;
       const p = (this.canvas as any).requestPointerLock(raw ? { unadjustedMovement: true } : undefined);
-      if (p && p.then) p.then(() => { this.lockRetry = false; }, () => {
+      if (p && p.then) p.then(() => { this.lockRetry = this.lockPending = false; }, () => {
         // Raw input is not supported everywhere; retry with the default mode.
         const q = (this.canvas as any).requestPointerLock();
-        if (q && q.then) q.then(() => { this.lockRetry = false; }, fail);
+        if (q && q.then) q.then(() => { this.lockRetry = this.lockPending = false; }, fail);
         else this.lockRetry = false;
       });
       else this.lockRetry = false;
@@ -373,6 +381,7 @@ export class Game {
   private resume(lock = true) {
     if (this.state !== 'paused') return;
     this.state = 'playing';
+    this.unlockedSince = 0;
     this.ui.show(null);
     if (lock || this.touch) this.requestLock();
   }
@@ -689,8 +698,17 @@ export class Game {
     this.time += dt;
     this.world.update(this.time, dt, this.camera.position);
 
-    if (this.state === 'playing' && this.locked()) this.simulate(dt);
-    else if (this.state === 'playing') this.ui.announce('CLICK TO CONTINUE', 'MOUSE NOT CAPTURED', 0.3);
+    if (this.state === 'playing' && this.locked()) {
+      this.unlockedSince = 0;
+      if (this.promptShown) { this.promptShown = false; this.ui.clearAnnounce(); }
+      this.simulate(dt);
+    } else if (this.state === 'playing') {
+      // Capture can take a moment to be granted (notably in Chrome on macOS), so only prompt
+      // once no request is pending and the mouse has stayed free for a while.
+      const now = performance.now();
+      if (!this.unlockedSince) this.unlockedSince = now;
+      if (!this.lockPending && now - this.unlockedSince > 500) { this.ui.announce('CLICK TO CONTINUE', 'MOUSE NOT CAPTURED', 0.3); this.promptShown = true; }
+    }
     else if (this.state === 'menu') {
       const a = this.time * 0.07;
       this.camera.position.set(Math.cos(a) * 21, 4.6, Math.sin(a) * 21);

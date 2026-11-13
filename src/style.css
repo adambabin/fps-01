@@ -53,6 +53,7 @@ button.primary:hover { background: #8be4ff; }
 .s-row input[type='range'] { width: 150px; accent-color: var(--cyan); }
 .s-row .val { width: 44px; text-align: right; color: var(--dim); font-variant-numeric: tabular-nums; font-size: 13px; }
 .s-row select { font: inherit; background: #10161d; color: var(--ink); border: 1px solid var(--line); padding: 5px 8px; }
+.s-row.toggle label { cursor: pointer; }
 .s-row input[type='checkbox'] { width: 18px; height: 18px; accent-color: var(--cyan); }
 .bind { display: flex; gap: 6px; }
 .bind button { padding: 5px 9px; font-size: 12px; letter-spacing: 0.06em; min-width: 84px; text-transform: none; }

@@ -15,7 +15,7 @@ import { FlowField } from './nav';
 import { Objectives, type KillSource } from './objectives';
 import { Player } from './player';
 import { TouchControls, isTouchDevice } from './touch';
-import { DIFFICULTY, loadHighScore, loadSettings, saveHighScore, saveScore, type Settings } from './settings';
+import { DIFFICULTY, codeLabel, loadHighScore, loadSettings, saveHighScore, saveScore, type Settings } from './settings';
 import { UI, type Card, type RadarBlip } from './ui';
 import { WEAPONS, WeaponSystem, type FireCtx } from './weapons';
 import { ARENAS, ARENA_ORDER, CEIL, World, type ArenaId } from './world';
@@ -135,6 +135,8 @@ export class Game {
   private queue: EnemyType[] = [];
   private spawnT = 0;
   private intermission = 0;
+  /** After a boss with arena rotation on, the run waits here until the player presses Ready. */
+  private awaitReady = false;
   private clearT = 0;
   private offers: Upgrade[] = [];
   private navT = 0;
@@ -378,7 +380,7 @@ export class Game {
     this.ranks = { firepower: 0, survival: 0, utility: 0 }; this.keystones.clear();
     this.lastStandReady = this.barrierUp = false; this.spree = this.spreeT = this.fabT = 0;
     this.lives = START_LIVES; this.objStreak = 0;
-    this.queue = []; this.clearT = 0; this.intermission = 2.5;
+    this.queue = []; this.clearT = 0; this.intermission = 2.5; this.awaitReady = false; this.touch?.showReady(false);
     this.state = 'playing';
     this.weapons.scene.visible = true;
     this.ui.show(null); this.ui.showHud(true);
@@ -535,6 +537,13 @@ export class Game {
 
   has(k: Keystone): boolean { return this.keystones.has(k); }
 
+  /** HUD line while waiting to travel; touch players have a NEXT ARENA button right below it. */
+  private readyPrompt(): string {
+    if (this.touch) return 'GRAB YOUR DROPS';
+    const code = this.pad.active && this.settings.pad.ready ? this.settings.pad.ready : this.settings.binds.ready[0];
+    return `PRESS ${codeLabel(code).toUpperCase()} FOR THE NEXT ARENA`;
+  }
+
   private pickUpgrade(i: number) {
     if (this.state !== 'upgrade' || !this.offers[i]) return;
     const o = this.offers[i];
@@ -548,7 +557,12 @@ export class Game {
     this.intermission = 3.5;
     this.state = 'playing';
     this.ui.show(null);
-    if (this.settings.rotate && this.wave % 5 === 0) { this.travel(); this.intermission = 5; }
+    // Before an arena change, wait for the player so they can collect the boss's drops first.
+    if (this.settings.rotate && this.wave % 5 === 0) {
+      this.intermission = 0; this.awaitReady = true;
+      this.touch?.showReady(true);
+      this.ui.announce('BOSS DOWN', this.readyPrompt(), 3);
+    }
     this.requestLock();
   }
 
@@ -853,8 +867,16 @@ export class Game {
     if (this.state !== 'playing') return;
 
     // Wave director
-    if (this.intermission > 0) {
+    if (this.awaitReady) {
+      if (this.input.wasPressed('ready')) {
+        this.awaitReady = false;
+        this.touch?.showReady(false);
+        this.travel(); this.intermission = 5;
+      }
+    } else if (this.intermission > 0) {
       this.intermission -= dt;
+      // Ready also skips the short countdown between waves.
+      if (this.input.wasPressed('ready')) this.intermission = 0;
       if (this.intermission <= 0) this.nextWave();
     } else if (this.clearT > 0) {
       this.clearT -= dt;
@@ -879,6 +901,7 @@ export class Game {
       health: p.health, maxHealth: p.maxHealth, armor: p.armor, maxArmor: p.maxArmor, wave: Math.max(1, this.wave),
       remaining: this.enemies.list.length + this.queue.length, score: this.score, weapons: w, spreadPx, ads: w.ads,
       sprinting: p.sprinting, fps: this.fps, intermission: this.intermission,
+      prompt: this.awaitReady ? this.readyPrompt() : '',
       best: this.best, perks: this.perkStatus(), lives: this.lives, maxLives: MAX_LIVES,
       boss: this.boss && this.boss.alive ? this.boss.hp / this.boss.maxHp : -1, bossName: this.boss ? this.boss.label : '',
     });

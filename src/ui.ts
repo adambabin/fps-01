@@ -345,7 +345,7 @@ export class UI {
 
   update(dt: number, d: {
     health: number; maxHealth: number; armor: number; maxArmor: number; wave: number; remaining: number; score: number;
-    weapons: WeaponSystem; spreadPx: number; ads: number; sprinting: boolean; fps: number; intermission: number; boss: number; bossName: string; best: number;
+    weapons: WeaponSystem; spreadPx: number; ads: number; sprinting: boolean; fps: number; intermission: number; prompt: string; boss: number; bossName: string; best: number;
     perks: string; lives: number; maxLives: number;
   }) {
     this.set('perks', d.perks);
@@ -362,7 +362,7 @@ export class UI {
     $('hp-fill').style.width = (d.health / d.maxHealth) * 100 + '%';
     $('armor-fill').style.width = (d.armor / d.maxArmor) * 100 + '%';
     this.set('wave', 'WAVE ' + d.wave);
-    this.set('remaining', d.intermission > 0 ? `NEXT WAVE IN ${Math.ceil(d.intermission)}` : d.remaining > 0 ? `${d.remaining} HOSTILE${d.remaining === 1 ? '' : 'S'}` : '');
+    this.set('remaining', d.prompt ? d.prompt : d.intermission > 0 ? `NEXT WAVE IN ${Math.ceil(d.intermission)}` : d.remaining > 0 ? `${d.remaining} HOSTILE${d.remaining === 1 ? '' : 'S'}` : '');
     this.set('score', d.score.toLocaleString());
     this.set('weapon-name', w.def.name);
     this.set('ammo', st.ammo);

@@ -4,7 +4,7 @@ import type { ArenaId } from './world';
 export const ACTIONS = [
   'forward', 'back', 'left', 'right', 'jump', 'sprint', 'crouch',
   'fire', 'ads', 'reload', 'grenade', 'melee',
-  'weapon1', 'weapon2', 'weapon3', 'weapon4', 'weapon5', 'weapon6', 'nextWeapon', 'pause',
+  'weapon1', 'weapon2', 'weapon3', 'weapon4', 'weapon5', 'weapon6', 'nextWeapon', 'pause', 'ready',
 ] as const;
 export type Action = (typeof ACTIONS)[number];
 
@@ -13,7 +13,7 @@ export const ACTION_LABELS: Record<Action, string> = {
   jump: 'Jump', sprint: 'Sprint', crouch: 'Crouch',
   fire: 'Fire', ads: 'Aim down sights', reload: 'Reload', grenade: 'Throw grenade', melee: 'Melee',
   weapon1: 'Weapon 1', weapon2: 'Weapon 2', weapon3: 'Weapon 3', weapon4: 'Weapon 4', weapon5: 'Weapon 5', weapon6: 'Weapon 6',
-  nextWeapon: 'Next weapon', pause: 'Pause',
+  nextWeapon: 'Next weapon', pause: 'Pause', ready: 'Start next wave',
 };
 
 export type Quality = 'low' | 'medium' | 'high';
@@ -52,6 +52,8 @@ export interface Settings {
   /** Right-stick turn rate; independent of the mouse sensitivity. */
   padSensitivity: number;
   padVibration: boolean;
+  /** Saved-settings revision, for one-time migrations of stored values (see loadSettings). */
+  rev: number;
 }
 
 /** Controller buttons in the standard layout, with Xbox names. The index is the `PadN` code. */
@@ -61,10 +63,13 @@ export function defaultPad(): Record<Action, string> {
   return {
     forward: '', back: '', left: '', right: '',
     jump: 'Pad0', crouch: 'Pad1', reload: 'Pad2', nextWeapon: 'Pad3', grenade: 'Pad4', melee: 'Pad5', ads: 'Pad6', fire: 'Pad7',
-    pause: 'Pad9', sprint: 'Pad10',
+    pause: 'Pad9', sprint: 'Pad10', ready: 'Pad8',
     weapon1: 'Pad12', weapon2: 'Pad15', weapon3: 'Pad13', weapon4: 'Pad14', weapon5: '', weapon6: '',
   };
 }
+
+/** Current saved-settings revision. 1: scroll switching on and hold-to-aim for everyone once. */
+const SETTINGS_REV = 1;
 
 export function defaultBinds(): Record<Action, string[]> {
   return {
@@ -73,7 +78,7 @@ export function defaultBinds(): Record<Action, string[]> {
     jump: ['Space'], sprint: ['ShiftLeft', 'ShiftRight'], crouch: ['KeyC', 'ControlLeft'],
     fire: ['Mouse0', 'KeyF'], ads: ['Mouse2', 'KeyQ'], reload: ['KeyR'], grenade: ['KeyG'], melee: ['KeyV', 'Mouse1'],
     weapon1: ['Digit1'], weapon2: ['Digit2'], weapon3: ['Digit3'], weapon4: ['Digit4'], weapon5: ['Digit5'], weapon6: ['Digit6'],
-    nextWeapon: ['KeyE'], pause: ['KeyP'],
+    nextWeapon: ['KeyE'], pause: ['KeyP'], ready: ['Enter', 'NumpadEnter'],
   };
 }
 
@@ -83,7 +88,7 @@ export function defaults(): Settings {
   return {
     sensitivity: 1.0, adsSensitivity: 1.0, invertY: false, fov: 75, quality: touch ? 'low' : 'medium', difficulty: 'normal', arena: 'reactor', rotate: true,
     volume: 0.7, adsToggle: false, scrollSwitch: true, rawInput: true, showFps: false,
-    damageNumbers: true, binds: defaultBinds(), pad: defaultPad(), padSensitivity: 1, padVibration: true,
+    damageNumbers: true, binds: defaultBinds(), pad: defaultPad(), padSensitivity: 1, padVibration: true, rev: SETTINGS_REV,
   };
 }
 
@@ -110,6 +115,12 @@ export function loadSettings(): Settings {
       const binds = { ...s.binds, ...(p.binds || {}) }, pad = { ...s.pad, ...(p.pad || {}) };
       Object.assign(s, p);
       s.binds = binds; s.pad = pad;
+      if (!(p.rev >= 1)) {
+        // Settings saved before rev 1 (e.g. by the trackpad preset) often had scroll switching
+        // off and toggle aim on; move everyone to the current defaults once, then respect choices.
+        s.scrollSwitch = true; s.adsToggle = false;
+      }
+      if (p.rev !== SETTINGS_REV) { s.rev = SETTINGS_REV; saveSettings(s); }
     }
   } catch { /* storage unavailable */ }
   return s;

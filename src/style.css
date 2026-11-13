@@ -201,6 +201,8 @@ body.touch { touch-action: manipulation; -webkit-touch-callout: none; -webkit-ta
 .tbtn.grenade { right: calc(108px + var(--sr)); bottom: calc(168px + var(--sb)); width: 48px; height: 48px; }
 .tbtn.melee { right: calc(30px + var(--sr)); bottom: calc(206px + var(--sb)); width: 48px; height: 48px; }
 .tbtn.swap { right: calc(176px + var(--sr)); bottom: calc(84px + var(--sb)); width: 48px; height: 48px; }
+.tbtn.ready { display: none; top: calc(64px + env(safe-area-inset-top, 0px)); left: 50%; margin-left: -60px; width: 120px; height: 44px; border-radius: 22px; font-size: 12px; border-color: var(--cyan); }
+#touch.waiting .tbtn.ready { display: flex; }
 .tbtn.pause { top: calc(10px + env(safe-area-inset-top, 0px)); left: 50%; margin-left: -150px; width: 40px; height: 40px; font-size: 12px; }
 
 /* Make room for the controls: the weapon panel moves to the bottom centre and the HUD shrinks. */

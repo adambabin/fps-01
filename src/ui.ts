@@ -113,6 +113,13 @@ export class UI {
     this.show('scores');
   }
 
+  /** Leaves the settings or scoreboard screen the way its Back button does. Returns true if it did. */
+  back(): boolean {
+    if (this.current === 'settings') { this.cb.click(); this.show(this.settingsFrom); return true; }
+    if (this.current === 'scores') { this.cb.click(); this.show(this.scoresFrom); return true; }
+    return false;
+  }
+
   private openSettings(from: Screen) { this.settingsFrom = from; this.buildSettings(); this.show('settings'); }
   private commit() { saveSettings(this.settings); this.cb.settingsChanged(); }
 

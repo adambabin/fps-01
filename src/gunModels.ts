@@ -67,6 +67,30 @@ export interface GunModel {
   slide?: THREE.Object3D;
   mag?: THREE.Object3D;
   pump?: THREE.Object3D;
+  /** Support hand and forearm, moved during reloads. */
+  off?: THREE.Object3D;
+  /** Charging handle pulled on an empty reload. */
+  bolt?: THREE.Object3D;
+  /** Item shown in the support hand while reloading (a shotgun shell). */
+  held?: THREE.Object3D;
+  reload: ReloadSpec;
+}
+
+/**
+ * How a gun reloads. Offsets are in model space, relative to the support hand's rest pose.
+ * `mag`: drop the magazine and seat a fresh one; `shells`: load rounds one at a time;
+ * `cylinder`: swing the cylinder out, load it and snap it shut.
+ */
+export interface ReloadSpec {
+  style: 'mag' | 'shells' | 'cylinder';
+  /** Where the support hand goes to grab the magazine, reach the loading port or the cylinder. */
+  reach: V3;
+  /** Where the support hand goes to rack the slide or charging handle on an empty reload. */
+  rack?: V3;
+  /** Gun pitch and roll at the height of the reload. */
+  tilt: [number, number];
+  /** How far the gun is brought up and in towards the centre, in view space. */
+  lift?: V3;
 }
 
 function pistol(): GunModel {
@@ -99,17 +123,21 @@ function pistol(): GunModel {
   for (let i = 0; i < 4; i++) r.add('off', 'glove', box(0.02, 0.019, 0.05, 0.008), { p: [-0.012, -0.058 - i * 0.021, 0.036 + i * 0.006], r: [-0.26, 0.2, 0] });
   r.add('off', 'glove', box(0.018, 0.018, 0.06, 0.007), { p: [-0.026, -0.024, 0.03] });
   forearm(r, 'off', [-0.04, -0.11, 0.09], [-0.26, -0.36, 0.3]);
-  return { group: r.bake(), muzzle: new THREE.Vector3(0, 0.023, -0.15), sightY: 0.0465, slide: r.root.getObjectByName('slide')!, mag: r.root.getObjectByName('mag')! };
+  const node = (n: string) => r.root.getObjectByName(n)!;
+  return {
+    group: r.bake(), muzzle: new THREE.Vector3(0, 0.023, -0.15), sightY: 0.0465, slide: node('slide'), mag: node('mag'), off: node('off'),
+    reload: { style: 'mag', reach: [0.01, -0.06, 0.01], rack: [0.03, 0.085, -0.02], tilt: [0.05, -0.45], lift: [-0.04, 0.03, 0] },
+  };
 }
 
 function rifle(): GunModel {
   const r = rig();
-  r.node('mag', 'root');
+  r.node('mag', 'root').node('off', 'root').node('bolt', 'root');
   r.add('root', 'black', box(0.044, 0.052, 0.3, 0.006), { p: [0, 0.022, -0.01] })
     .add('root', 'black', prismX([[0.14, 0], [-0.14, 0], [-0.14, -0.03], [-0.09, -0.052], [-0.015, -0.052], [0, -0.03], [0.11, -0.03], [0.14, -0.012]], 0.04, 0.004))
     .add('root', 'steel', box(0.004, 0.018, 0.06), { p: [0.0225, 0.024, -0.03] })
     .add('root', 'dark', box(0.004, 0.012, 0.05), { p: [0.0232, 0.024, -0.03] })
-    .add('root', 'black', cyl(0.007, 0.03, 'z'), { p: [0.026, 0.03, 0.09] })
+    .add('bolt', 'black', cyl(0.007, 0.03, 'z'), { p: [0.026, 0.03, 0.09] })
     .add('root', 'black', box(0.05, 0.008, 0.02, 0.003), { p: [0, 0.044, 0.146] })
     .add('root', 'steel', cyl(0.005, 0.046, 'x'), { p: [0, 0.006, 0.04] })
     .add('root', 'steel', cyl(0.005, 0.046, 'x'), { p: [0, 0.006, -0.12] })
@@ -141,13 +169,17 @@ function rifle(): GunModel {
   r.add('mag', 'poly', prismX([[-0.022, -0.045], [-0.082, -0.045], [-0.105, -0.2], [-0.048, -0.21]], 0.028, 0.004));
   for (let i = 0; i < 3; i++) r.add('mag', 'rubber', box(0.03, 0.004, 0.052), { p: [0, -0.095 - i * 0.035, -0.062 - i * 0.006], r: [0.14, 0, 0] });
   gripHand(r, 'root', -0.085, 0.105);
-  supportHand(r, 'root', -0.012, -0.27, 0.025);
-  return { group: r.bake(), muzzle: new THREE.Vector3(0, 0.02, -0.64), sightY: 0.0935, mag: r.root.getObjectByName('mag')! };
+  supportHand(r, 'off', -0.012, -0.27, 0.025);
+  const node = (n: string) => r.root.getObjectByName(n)!;
+  return {
+    group: r.bake(), muzzle: new THREE.Vector3(0, 0.02, -0.64), sightY: 0.0935, mag: node('mag'), off: node('off'), bolt: node('bolt'),
+    reload: { style: 'mag', reach: [0, -0.1, 0.2], rack: [0.035, 0.05, 0.35], tilt: [0.12, -0.5] },
+  };
 }
 
 function shotgun(): GunModel {
   const r = rig();
-  r.node('pump', 'root');
+  r.node('pump', 'root').node('off', 'pump').node('held', 'off');
   r.add('root', 'black', prismX([[0.13, 0.04], [-0.12, 0.04], [-0.12, -0.03], [0.06, -0.035], [0.13, -0.02]], 0.046, 0.006))
     .add('root', 'steel', box(0.004, 0.022, 0.07), { p: [0.0235, 0.012, -0.03] })
     .add('root', 'dark', box(0.004, 0.015, 0.06), { p: [0.0242, 0.012, -0.03] })
@@ -175,13 +207,20 @@ function shotgun(): GunModel {
   for (let i = 0; i < 6; i++) r.add('pump', 'rubber', box(0.053, 0.036, 0.007, 0.002), { p: [0, -0.014, -0.245 - i * 0.022] });
   for (const s of [1, -1]) r.add('pump', 'steel', box(0.003, 0.006, 0.2), { p: [0.019 * s, -0.002, -0.19] });
   gripHand(r, 'root', -0.085, 0.19, [0.13, -0.34, 0.5]);
-  supportHand(r, 'pump', -0.04, -0.3, 0.025);
-  return { group: r.bake(), muzzle: new THREE.Vector3(0, 0.022, -0.64), sightY: 0.058, pump: r.root.getObjectByName('pump')! };
+  supportHand(r, 'off', -0.04, -0.3, 0.025);
+  // A shell held in the fingertips while loading.
+  r.add('held', 'shell', cyl(0.0085, 0.05, 'z'), { p: [0, -0.012, -0.33] })
+    .add('held', 'brass', cyl(0.0088, 0.012, 'z'), { p: [0, -0.012, -0.302] });
+  const node = (n: string) => r.root.getObjectByName(n)!;
+  return {
+    group: r.bake(), muzzle: new THREE.Vector3(0, 0.022, -0.64), sightY: 0.058, pump: node('pump'), off: node('off'), held: node('held'),
+    reload: { style: 'shells', reach: [0, -0.02, 0.23], tilt: [0.1, -0.7] },
+  };
 }
 
 function railgun(): GunModel {
   const r = rig();
-  r.node('mag', 'root');
+  r.node('mag', 'root').node('off', 'root');
   r.add('root', 'black', prismX([[0.16, 0.05], [-0.14, 0.05], [-0.18, 0.03], [-0.18, -0.04], [-0.1, -0.06], [0.12, -0.06], [0.16, -0.03]], 0.06, 0.008))
     .add('root', 'plate', box(0.064, 0.032, 0.17, 0.005), { p: [0, 0.004, 0] })
     .add('root', 'plate', prismX([[-0.18, 0.042], [-0.7, 0.036], [-0.725, 0.026], [-0.725, 0.02], [-0.18, 0.02]], 0.036, 0.004))
@@ -212,13 +251,17 @@ function railgun(): GunModel {
   r.add('mag', 'poly', box(0.046, 0.07, 0.11, 0.008), { p: [0, -0.09, -0.07] })
     .add('mag', 'cyan', box(0.048, 0.012, 0.07), { p: [0, -0.09, -0.07] });
   gripHand(r, 'root', -0.112, 0.12);
-  supportHand(r, 'root', -0.04, -0.33, 0.019);
-  return { group: r.bake(), muzzle: new THREE.Vector3(0, 0.009, -0.74), sightY: 0.0975, mag: r.root.getObjectByName('mag')! };
+  supportHand(r, 'off', -0.04, -0.33, 0.019);
+  const node = (n: string) => r.root.getObjectByName(n)!;
+  return {
+    group: r.bake(), muzzle: new THREE.Vector3(0, 0.009, -0.74), sightY: 0.0975, mag: node('mag'), off: node('off'),
+    reload: { style: 'mag', reach: [0, -0.06, 0.26], rack: [0.05, 0.06, 0.3], tilt: [0.1, -0.5] },
+  };
 }
 
 function smg(): GunModel {
   const r = rig();
-  r.node('mag', 'root');
+  r.node('mag', 'root').node('off', 'root');
   r.add('root', 'black', box(0.04, 0.058, 0.25, 0.007), { p: [0, 0.02, 0] })
     .add('root', 'black', prismX([[0.11, -0.008], [-0.125, -0.008], [-0.125, -0.034], [-0.06, -0.04], [0.02, -0.04], [0.11, -0.03]], 0.036, 0.004))
     .add('root', 'steel', box(0.004, 0.016, 0.05), { p: [0.0205, 0.024, -0.02] })
@@ -245,13 +288,17 @@ function smg(): GunModel {
   r.add('mag', 'black', box(0.024, 0.2, 0.036, 0.004), { p: [0, -0.135, -0.03], r: [0.06, 0, 0] })
     .add('mag', 'rubber', box(0.028, 0.012, 0.04, 0.003), { p: [0, -0.238, -0.036], r: [0.06, 0, 0] });
   gripHand(r, 'root', -0.078, 0.092, [0.13, -0.33, 0.4]);
-  supportHand(r, 'root', -0.027, -0.19, 0.017);
-  return { group: r.bake(), muzzle: new THREE.Vector3(0, 0.02, -0.33), sightY: 0.0845, mag: r.root.getObjectByName('mag')! };
+  supportHand(r, 'off', -0.027, -0.19, 0.017);
+  const node = (n: string) => r.root.getObjectByName(n)!;
+  return {
+    group: r.bake(), muzzle: new THREE.Vector3(0, 0.02, -0.33), sightY: 0.0845, mag: node('mag'), off: node('off'),
+    reload: { style: 'mag', reach: [0, -0.1, 0.16], rack: [0.035, 0.06, 0.22], tilt: [0.12, -0.5] },
+  };
 }
 
 function launcher(): GunModel {
   const r = rig();
-  r.node('mag', 'root');
+  r.node('mag', 'root').node('off', 'root');
   r.add('root', 'plate', cyl(0.031, 0.36, 'z', 16), { p: [0, 0.02, -0.33] })
     .add('root', 'dark', cyl(0.025, 0.362, 'z', 16), { p: [0, 0.02, -0.331] })
     .add('root', 'black', cyl(0.035, 0.03, 'z', 16), { p: [0, 0.02, -0.5] })
@@ -280,8 +327,12 @@ function launcher(): GunModel {
       .add('mag', 'plate', box(0.01, 0.012, 0.1, 0.003), { p: [Math.sin(a + 0.52) * 0.058, Math.cos(a + 0.52) * 0.058, -0.075], r: [0, 0, -a - 0.52] });
   }
   gripHand(r, 'root', -0.088, 0.105);
-  supportHand(r, 'root', -0.048, -0.3, 0.023);
-  return { group: r.bake(), muzzle: new THREE.Vector3(0, 0.02, -0.53), sightY: 0.102, mag: r.root.getObjectByName('mag')! };
+  supportHand(r, 'off', -0.048, -0.3, 0.023);
+  const node = (n: string) => r.root.getObjectByName(n)!;
+  return {
+    group: r.bake(), muzzle: new THREE.Vector3(0, 0.02, -0.53), sightY: 0.102, mag: node('mag'), off: node('off'),
+    reload: { style: 'cylinder', reach: [-0.08, 0.03, 0.2], tilt: [0.12, -0.55] },
+  };
 }
 
 export function buildGun(i: number): GunModel {

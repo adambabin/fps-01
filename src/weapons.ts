@@ -6,7 +6,7 @@ import type { Input } from './input';
 import type { CollisionWorld } from './physics';
 import type { Player } from './player';
 import type { Settings } from './settings';
-import { buildGun, railGlow, type GunModel } from './gunModels';
+import { buildGun, railGlow, type GunModel, type ReloadSpec } from './gunModels';
 import { makeFlashTexture } from './textures';
 
 export interface WeaponDef {
@@ -74,6 +74,127 @@ export interface FireCtx {
 
 const MELEE_TIME = 0.5, MELEE_DAMAGE = 90;
 
+type V3 = [number, number, number];
+const ZERO3: V3 = [0, 0, 0], DEFAULT_LIFT: V3 = [-0.07, 0.1, 0.03];
+type StepKind = 'out' | 'in' | 'rack' | 'shell' | 'open' | 'close' | 'grab';
+interface ReloadStep { p: number; kind: StepKind; }
+
+/*
+ * Reload choreography. Everything is a function of reload progress p (0..1), so it stays in
+ * step at any reload speed (upgrades, Killing spree). An empty reload ends with a rack of the
+ * slide, charging handle or pump; a partial one skips it.
+ */
+const MAG = { grab: 0.16, out: 0.22, down: [0.24, 0.36], up: [0.38, 0.54], seat: [0.54, 0.6], toRack: [0.64, 0.74], pull: [0.74, 0.8], back: [0.82, 0.96], backTac: [0.64, 0.84] };
+const CYL = { open: 0.14, load: 0.56, close: 0.75 };
+/** Shotgun: shells are loaded between these points; an empty one is pumped at `pump`. */
+const SHELLS = { start: 0.12, end: 0.88, endEmpty: 0.78, pump: 0.86 };
+
+function shellCycle(empty: boolean, rounds: number) {
+  const n = Math.max(1, rounds), end = empty ? SHELLS.endEmpty : SHELLS.end;
+  return { n, len: (end - SHELLS.start) / n };
+}
+
+/** Sound and ammo steps for a reload, in progress order. */
+function reloadSteps(style: ReloadSpec['style'], empty: boolean, rounds: number): ReloadStep[] {
+  if (style === 'mag') return [{ p: MAG.grab, kind: 'grab' }, { p: MAG.out, kind: 'out' }, { p: MAG.seat[1], kind: 'in' }, ...(empty ? [{ p: MAG.pull[1], kind: 'rack' as const }] : [])];
+  if (style === 'cylinder') return [{ p: CYL.open, kind: 'open' }, { p: CYL.load, kind: 'in' }, { p: CYL.close, kind: 'close' }];
+  const { n, len } = shellCycle(empty, rounds), steps: ReloadStep[] = [];
+  for (let i = 0; i < n; i++) steps.push({ p: SHELLS.start + (i + 0.9) * len, kind: 'shell' });
+  if (empty) steps.push({ p: SHELLS.pump, kind: 'rack' });
+  return steps;
+}
+
+const ss = (p: number, a: number, b: number) => { const t = Math.min(1, Math.max(0, (p - a) / (b - a))); return t * t * (3 - 2 * t); };
+const add = (a: V3, b: V3): V3 => [a[0] + b[0], a[1] + b[1], a[2] + b[2]];
+/** Moves `v` towards `to` by weight w; chaining these traces a path through keyframes. */
+const toward = (v: V3, to: V3, w: number): V3 => [v[0] + (to[0] - v[0]) * w, v[1] + (to[1] - v[1]) * w, v[2] + (to[2] - v[2]) * w];
+/** A sharp jolt that decays after progress `at`. */
+const jolt = (p: number, at: number, dur: number) => (p < at ? 0 : Math.exp(-(p - at) * dur * 14));
+
+interface ReloadPose {
+  gun: V3; gunRot: [number, number];
+  hand: V3; mag: V3; magRot: [number, number];
+  /** Slide held open (empty pistol) and charging-handle pull, 0..1. */
+  slideBack: number; pull: number;
+  held: boolean;
+}
+
+function reloadPose(spec: ReloadSpec, p: number, empty: boolean, rounds: number, dur: number): ReloadPose {
+  const reach = spec.reach, rack = spec.rack ?? reach, lift = spec.lift ?? DEFAULT_LIFT;
+  let hand: V3 = [0, 0, 0], mag: V3 = [0, 0, 0], magRot: [number, number] = [0, 0];
+  let slideBack = 0, pull = 0, held = false, tiltIn = ss(p, 0, 0.14), tiltOut = 1, bump = 0;
+
+  if (spec.style === 'mag') {
+    const down = add(reach, [-0.03, -0.38, 0.06]);
+    hand = toward(hand, reach, ss(p, 0.04, MAG.grab));
+    hand = toward(hand, down, ss(p, MAG.down[0], MAG.down[1]));
+    hand = toward(hand, add(reach, [0, -0.09, 0.005]), ss(p, MAG.up[0], MAG.up[1]));
+    hand = toward(hand, reach, ss(p, MAG.seat[0], MAG.seat[1]));
+    if (empty) {
+      hand = toward(hand, rack, ss(p, MAG.toRack[0], MAG.toRack[1]));
+      hand = toward(hand, add(rack, [0, 0, 0.05]), ss(p, MAG.pull[0], MAG.pull[1]));
+      hand = toward(hand, ZERO3, ss(p, MAG.back[0], MAG.back[1]));
+      pull = p >= MAG.pull[0] && p < MAG.pull[1] ? ss(p, MAG.pull[0], MAG.pull[1]) : 0;
+      slideBack = p < MAG.pull[1] ? 1 : 0;
+      tiltOut = 1 - ss(p, 0.84, 1);
+      bump -= 0.6 * jolt(p, MAG.pull[1], dur);
+    } else {
+      hand = toward(hand, ZERO3, ss(p, MAG.backTac[0], MAG.backTac[1]));
+      tiltOut = 1 - ss(p, 0.7, 0.94);
+    }
+    if (p < MAG.out) mag = [0, 0, 0];
+    else if (p < MAG.up[0]) {
+      // The old magazine drops free and tumbles out of view.
+      const t = (p - MAG.out) * dur;
+      mag = [-0.02 * t, -7 * t * t - 0.05 * t, 0.12 * t]; magRot = [-5 * t, 1.5 * t];
+    } else {
+      // The fresh one travels up in the hand and seats.
+      mag = [hand[0] - reach[0], Math.min(0, hand[1] - reach[1]), hand[2] - reach[2]];
+    }
+    bump += jolt(p, MAG.seat[1], dur);
+  } else if (spec.style === 'shells') {
+    const { n, len } = shellCycle(empty, rounds);
+    const fetch = add(reach, [0.03, -0.3, 0.06]), ready = add(reach, [0, -0.035, 0.03]);
+    hand = toward(hand, reach, ss(p, 0.02, SHELLS.start));
+    const i = Math.min(n - 1, Math.max(0, Math.floor((p - SHELLS.start) / len)));
+    const q = (p - SHELLS.start - i * len) / len;
+    if (p >= SHELLS.start && q <= 1) {
+      hand = toward(hand, fetch, ss(q, 0, 0.35));
+      hand = toward(hand, ready, ss(q, 0.35, 0.72));
+      hand = toward(hand, reach, ss(q, 0.72, 0.9));
+      held = q > 0.3 && q < 0.9;
+      bump += 0.4 * jolt(q, 0.9, dur * len);
+    }
+    const end = SHELLS.start + n * len;
+    if (empty) {
+      hand = toward(hand, ZERO3, ss(p, end, end + 0.06));
+      tiltOut = 1 - ss(p, end + 0.02, end + 0.1);
+    } else {
+      hand = toward(hand, ZERO3, ss(p, end, 0.97));
+      tiltOut = 1 - ss(p, 0.84, 1);
+    }
+  } else {
+    // Cylinder: the hand pushes it out, fetches a speed loader, loads, and the gun flicks it shut.
+    const swing = ss(p, 0.1, 0.18) * (1 - ss(p, CYL.close - 0.03, CYL.close));
+    mag = [-0.075 * swing, -0.012 * swing, 0];
+    magRot = [0, 8 * Math.PI * ss(p, CYL.open, CYL.close)];
+    hand = toward(hand, reach, ss(p, 0.03, CYL.open));
+    hand = toward(hand, add(reach, [-0.02, -0.35, 0.08]), ss(p, 0.2, 0.32));
+    hand = toward(hand, add(reach, [0, 0, 0.08]), ss(p, 0.34, 0.5));
+    hand = toward(hand, add(reach, [0, 0, 0.035]), ss(p, 0.5, CYL.load));
+    hand = toward(hand, add(reach, [-0.04, -0.12, 0.1]), ss(p, 0.6, 0.7));
+    hand = toward(hand, ZERO3, ss(p, 0.76, 0.9));
+    bump += jolt(p, CYL.load, dur) * 0.5 - jolt(p, CYL.close, dur) * 1.2;
+    tiltOut = 1 - ss(p, 0.78, 1);
+  }
+
+  const t = tiltIn * tiltOut;
+  return {
+    gun: [lift[0] * t, lift[1] * t + 0.012 * bump, lift[2] * t], gunRot: [spec.tilt[0] * t + 0.07 * bump, spec.tilt[1] * t],
+    hand, mag, magRot, slideBack, pull, held,
+  };
+}
+
 const fwd = new THREE.Vector3(), right = new THREE.Vector3(), up = new THREE.Vector3(), dirv = new THREE.Vector3();
 const start = new THREE.Vector3(), end = new THREE.Vector3();
 
@@ -117,6 +238,11 @@ export class WeaponSystem {
   private muzzleLight: THREE.PointLight;
   private wheelAcc = 0;
   private wheelCd = 0;
+  /** Current reload: whether it started empty (adds a rack), rounds to load, and timed sound/ammo steps. */
+  private reloadEmpty = false;
+  private reloadRounds = 0;
+  private reloadSteps: ReloadStep[] = [];
+  private reloadPrevP = 0;
 
   constructor(worldScene: THREE.Scene, env: THREE.Texture | null) {
     this.scene.environment = env;
@@ -195,17 +321,20 @@ export class WeaponSystem {
     }
   }
 
-  private startReload(audio: AudioSys) {
+  private startReload(_audio: AudioSys) {
     const s = this.state;
     if (this.reloadT > 0 || this.switchT > 0 || s.ammo >= this.magSize() || s.reserve <= 0) return;
     this.reloadDur = this.reloadT = this.def.reload * this.mods.reload;
-    audio.reload(this.reloadDur);
+    this.reloadEmpty = s.ammo === 0;
+    this.reloadRounds = Math.min(this.magSize() - s.ammo, s.reserve);
+    this.reloadSteps = reloadSteps(this.guns[this.current].reload.style, this.reloadEmpty, this.reloadRounds);
+    this.reloadPrevP = 0;
   }
 
   /** Fills the current magazine from reserve at once (Combat slide). */
   instantReload(audio: AudioSys) {
     const s = this.state, take = Math.min(this.magSize() - s.ammo, s.reserve);
-    this.reloadT = 0;
+    this.reloadT = 0; this.reloadSteps = [];
     if (take <= 0 || this.switchT > 0) return;
     s.ammo += take;
     if (isFinite(s.reserve)) s.reserve -= take;
@@ -268,6 +397,15 @@ export class WeaponSystem {
     if (input.wasPressed('reload')) this.startReload(c.audio);
     if (this.reloadT > 0) {
       this.reloadT -= dt * this.boost;
+      // Play each step as the animation reaches it; a shotgun gains one shell per step.
+      const p = Math.min(1, 1 - this.reloadT / this.reloadDur);
+      for (const step of this.reloadSteps) {
+        if (step.p <= this.reloadPrevP || step.p > p) continue;
+        c.audio.reloadStep(step.kind);
+        if (step.kind === 'shell' && st.reserve > 0 && st.ammo < this.magSize()) { st.ammo++; if (isFinite(st.reserve)) st.reserve--; }
+        if (step.kind === 'rack' && this.guns[this.current].pump) this.pumpT = 0.52;
+      }
+      this.reloadPrevP = p;
       if (this.reloadT <= 0) {
         const need = this.magSize() - st.ammo, take = Math.min(need, st.reserve);
         st.ammo += take;
@@ -397,14 +535,9 @@ export class WeaponSystem {
     const s = this.sprintT * (1 - e);
     x -= s * 0.05; y -= s * 0.06; ry += s * 0.55; rx -= s * 0.22;
 
-    // Reload: dip and roll.
-    if (this.reloadT > 0) {
-      const p = 1 - this.reloadT / this.reloadDur;
-      const env = Math.min(1, p / 0.18, (1 - p) / 0.18);
-      const sm = env * env * (3 - 2 * env);
-      y -= sm * 0.12; rx += sm * 0.5; rz += sm * 0.45; x -= sm * 0.03;
-      y += Math.sin(p * Math.PI * 4) * 0.008 * sm;
-    }
+    // Reload: tilt the gun towards the support hand while it works (see reloadPose).
+    const rp = this.reloadT > 0 ? reloadPose(gun.reload, 1 - this.reloadT / this.reloadDur, this.reloadEmpty, this.reloadRounds, this.reloadDur) : null;
+    if (rp) { x += rp.gun[0]; y += rp.gun[1]; z += rp.gun[2]; rx += rp.gunRot[0]; rz += rp.gunRot[1]; }
     // Melee: swing the weapon across and forward, then recover.
     if (this.meleeT > 0) {
       const p = 1 - this.meleeT / MELEE_TIME;
@@ -423,19 +556,18 @@ export class WeaponSystem {
 
     // Moving parts: pistol slide, shotgun pump, magazines, railgun charge glow.
     const st = this.state;
-    if (gun.slide) gun.slide.position.z = st.ammo === 0 && !this.reloading ? 0.032 : Math.min(0.034, this.kick * 0.032);
+    if (gun.slide) gun.slide.position.z = rp ? Math.max(rp.slideBack, rp.pull) * 0.032 : st.ammo === 0 ? 0.032 : Math.min(0.034, this.kick * 0.032);
+    if (gun.bolt) gun.bolt.position.z = rp ? rp.pull * 0.05 : 0;
+    if (gun.off) gun.off.position.set(...(rp ? rp.hand : ZERO3));
+    if (gun.held) gun.held.visible = !!rp && rp.held;
     if (gun.pump) {
       this.pumpT = Math.max(0, this.pumpT - dt);
       const t = 1 - this.pumpT / 0.4;
       gun.pump.position.z = this.pumpT > 0 && t > 0 ? Math.sin(t * Math.PI) * 0.075 : 0;
     }
     if (gun.mag) {
-      let d = 0;
-      if (this.reloadT > 0) {
-        const p = 1 - this.reloadT / this.reloadDur;
-        d = p < 0.2 ? 0 : p < 0.34 ? (p - 0.2) / 0.14 : p < 0.6 ? 1 : p < 0.78 ? 1 - (p - 0.6) / 0.18 : 0;
-      }
-      gun.mag.position.y = -d * 0.3;
+      gun.mag.position.set(...(rp ? rp.mag : ZERO3));
+      gun.mag.rotation.set(rp ? rp.magRot[0] : 0, 0, rp ? rp.magRot[1] : 0);
     }
     if (def.pierce) {
       const ready = st.ammo > 0 && !this.reloading ? Math.max(0.25, 1 - Math.max(0, this.cooldown) / (60 / def.rpm)) : 0.15;

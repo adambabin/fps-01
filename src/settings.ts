@@ -47,7 +47,12 @@ export interface Settings {
   showFps: boolean;
   damageNumbers: boolean;
   binds: Record<Action, string[]>;
+  /** Saved-settings revision, for one-time migrations of stored values (see loadSettings). */
+  rev: number;
 }
+
+/** Current saved-settings revision. 1: scroll switching on and hold-to-aim for everyone once. */
+const SETTINGS_REV = 1;
 
 export function defaultBinds(): Record<Action, string[]> {
   return {
@@ -66,7 +71,7 @@ export function defaults(): Settings {
   return {
     sensitivity: 1.0, adsSensitivity: 1.0, invertY: false, fov: 75, quality: touch ? 'low' : 'medium', difficulty: 'normal', arena: 'reactor', rotate: true,
     volume: 0.7, adsToggle: false, scrollSwitch: true, rawInput: true, showFps: false,
-    damageNumbers: true, binds: defaultBinds(),
+    damageNumbers: true, binds: defaultBinds(), rev: SETTINGS_REV,
   };
 }
 
@@ -93,6 +98,12 @@ export function loadSettings(): Settings {
       const binds = { ...s.binds, ...(p.binds || {}) };
       Object.assign(s, p);
       s.binds = binds;
+      if (!(p.rev >= 1)) {
+        // Settings saved before rev 1 (e.g. by the trackpad preset) often had scroll switching
+        // off and toggle aim on; move everyone to the current defaults once, then respect choices.
+        s.scrollSwitch = true; s.adsToggle = false;
+      }
+      if (p.rev !== SETTINGS_REV) { s.rev = SETTINGS_REV; saveSettings(s); }
     }
   } catch { /* storage unavailable */ }
   return s;

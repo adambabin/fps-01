@@ -192,3 +192,64 @@ export function makeFlashTexture(): THREE.Texture {
   t.colorSpace = THREE.SRGBColorSpace;
   return t;
 }
+
+/** Low-frequency noise (two independent channels) used to break up tiling across large surfaces. */
+export function makeMacroTexture(): THREE.Texture {
+  const size = 256, a = makeNoise(size, 401, 3, 5), b = makeNoise(size, 577, 5, 4);
+  const data = new Uint8Array(size * size * 4);
+  for (let i = 0; i < size * size; i++) { data[i * 4] = a[i] * 255; data[i * 4 + 1] = b[i] * 255; data[i * 4 + 3] = 255; }
+  return dataTex(data, size, false);
+}
+
+/** Irregular dark blotch with soft edges, for oil stains and leak marks. */
+export function makeStainTexture(): THREE.Texture {
+  const size = 128, n = makeNoise(size, 911, 4, 4), data = new Uint8Array(size * size * 4);
+  for (let y = 0; y < size; y++) for (let x = 0; x < size; x++) {
+    const i = y * size + x, d = Math.hypot(x - size / 2, y - size / 2) / (size / 2);
+    const v = Math.max(0, Math.min(1, (1 - d - (1 - n[i]) * 0.75 + 0.3) * 2.2));
+    data[i * 4 + 3] = v * v * 235;
+  }
+  const t = new THREE.DataTexture(data, size, size, THREE.RGBAFormat);
+  t.magFilter = THREE.LinearFilter; t.minFilter = THREE.LinearMipmapLinearFilter; t.generateMipmaps = true;
+  t.needsUpdate = true;
+  return t;
+}
+
+/** Bullet hole: dark pit with a thin ring of bright chipped metal around it. */
+export function makeHoleTexture(): THREE.Texture {
+  const c = document.createElement('canvas');
+  c.width = c.height = 64;
+  const g = c.getContext('2d')!, r = rng(21);
+  const grad = g.createRadialGradient(32, 32, 1, 32, 32, 30);
+  grad.addColorStop(0, 'rgba(0,0,0,1)'); grad.addColorStop(0.3, 'rgba(6,6,7,0.95)');
+  grad.addColorStop(0.42, 'rgba(150,150,155,0.7)'); grad.addColorStop(0.55, 'rgba(20,20,22,0.5)'); grad.addColorStop(1, 'rgba(0,0,0,0)');
+  g.fillStyle = grad; g.fillRect(0, 0, 64, 64);
+  g.strokeStyle = 'rgba(0,0,0,0.6)'; g.lineWidth = 1;
+  for (let i = 0; i < 7; i++) {
+    const a = r() * 6.28, l = 12 + r() * 16;
+    g.beginPath(); g.moveTo(32 + Math.cos(a) * 6, 32 + Math.sin(a) * 6); g.lineTo(32 + Math.cos(a) * l, 32 + Math.sin(a) * l); g.stroke();
+  }
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.SRGBColorSpace;
+  return t;
+}
+
+/** Stencilled wall lettering with paint wear. */
+export function makeSignTexture(text: string, color = '#d8dde4'): THREE.Texture {
+  const c = document.createElement('canvas');
+  c.width = 512; c.height = 96;
+  const g = c.getContext('2d')!, r = rng(text.length * 131 + text.charCodeAt(0));
+  g.font = '700 64px "Arial Narrow", Arial, sans-serif';
+  g.textAlign = 'center'; g.textBaseline = 'middle';
+  g.fillStyle = color;
+  g.fillText(text, 256, 52, 490);
+  g.globalCompositeOperation = 'destination-out';
+  for (let i = 0; i < 700; i++) {
+    g.fillStyle = `rgba(0,0,0,${0.2 + r() * 0.6})`;
+    g.fillRect(r() * 512, r() * 96, 1 + r() * 9, 1 + r() * 2);
+  }
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.SRGBColorSpace;
+  t.anisotropy = 8;
+  return t;
+}

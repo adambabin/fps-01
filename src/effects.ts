@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { makeRadialTexture } from './textures';
+import { makeHoleTexture, makeRadialTexture } from './textures';
 
 const VERT = /* glsl */ `
 attribute float psize;
@@ -30,6 +30,8 @@ void main() {
 interface EmitOpts {
   life: number; size: number; sizeEnd?: number; gravity?: number; drag?: number;
   r: number; g: number; b: number; a?: number;
+  /** 0..1: how far the colour shifts from its start toward deep red as the particle dies, like cooling fire. */
+  cool?: number;
 }
 
 /** CPU particle pool rendered as one draw call. */
@@ -39,7 +41,7 @@ class Particles {
   private pos: Float32Array; private col: Float32Array; private size: Float32Array;
   private vel: Float32Array; private life: Float32Array; private max: Float32Array;
   private s0: Float32Array; private s1: Float32Array; private grav: Float32Array; private drag: Float32Array;
-  private base: Float32Array;
+  private base: Float32Array; private cool: Float32Array;
   private cursor = 0;
   private mat: THREE.ShaderMaterial;
 
@@ -48,7 +50,7 @@ class Particles {
     this.pos = new Float32Array(n * 3); this.col = new Float32Array(n * 4); this.size = new Float32Array(n);
     this.vel = new Float32Array(n * 3); this.life = new Float32Array(n); this.max = new Float32Array(n);
     this.s0 = new Float32Array(n); this.s1 = new Float32Array(n); this.grav = new Float32Array(n); this.drag = new Float32Array(n);
-    this.base = new Float32Array(n * 4);
+    this.base = new Float32Array(n * 4); this.cool = new Float32Array(n);
     const g = new THREE.BufferGeometry();
     g.setAttribute('position', new THREE.BufferAttribute(this.pos, 3).setUsage(THREE.DynamicDrawUsage));
     g.setAttribute('pcolor', new THREE.BufferAttribute(this.col, 4).setUsage(THREE.DynamicDrawUsage));
@@ -72,7 +74,7 @@ class Particles {
     this.vel[i * 3] = vx; this.vel[i * 3 + 1] = vy; this.vel[i * 3 + 2] = vz;
     this.life[i] = this.max[i] = o.life;
     this.s0[i] = o.size; this.s1[i] = o.sizeEnd ?? o.size;
-    this.grav[i] = o.gravity ?? 0; this.drag[i] = o.drag ?? 0;
+    this.grav[i] = o.gravity ?? 0; this.drag[i] = o.drag ?? 0; this.cool[i] = o.cool ?? 0;
     this.base[i * 4] = o.r; this.base[i * 4 + 1] = o.g; this.base[i * 4 + 2] = o.b; this.base[i * 4 + 3] = o.a ?? 1;
   }
 
@@ -86,7 +88,8 @@ class Particles {
       pos[i * 3] += vel[i * 3] * dt; pos[i * 3 + 1] += vel[i * 3 + 1] * dt; pos[i * 3 + 2] += vel[i * 3 + 2] * dt;
       if (pos[i * 3 + 1] < 0.02 && this.grav[i] > 0) { pos[i * 3 + 1] = 0.02; vel[i * 3 + 1] *= -0.35; vel[i * 3] *= 0.6; vel[i * 3 + 2] *= 0.6; }
       size[i] = this.s1[i] + (this.s0[i] - this.s1[i]) * k;
-      col[i * 4] = base[i * 4]; col[i * 4 + 1] = base[i * 4 + 1]; col[i * 4 + 2] = base[i * 4 + 2];
+      const heat = 1 - this.cool[i] * (1 - k);
+      col[i * 4] = base[i * 4] * (0.4 + 0.6 * heat); col[i * 4 + 1] = base[i * 4 + 1] * heat * heat; col[i * 4 + 2] = base[i * 4 + 2] * heat * heat * heat;
       col[i * 4 + 3] = base[i * 4 + 3] * Math.min(1, k * 2);
     }
     const g = this.points.geometry;
@@ -112,6 +115,7 @@ export class Effects {
   private tracers: Tracer[] = [];
   private tracerIdx = 0;
   private decals: THREE.Mesh[] = [];
+  private holeMat: THREE.Material; private scorchMat: THREE.Material;
   private decalIdx = 0;
   private debris: Debris[] = [];
   private debrisIdx = 0;
@@ -128,10 +132,9 @@ export class Effects {
       scene.add(mesh);
       this.tracers.push({ mesh, mat, life: 0, max: 1 });
     }
-    const dm = new THREE.MeshBasicMaterial({
-      map: makeRadialTexture('rgba(0,0,0,0.9)', 'rgba(0,0,0,0)'), transparent: true, depthWrite: false,
-      polygonOffset: true, polygonOffsetFactor: -4,
-    });
+    const decal = (map: THREE.Texture) => new THREE.MeshBasicMaterial({ map, transparent: true, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -4 });
+    const dm = this.holeMat = decal(makeHoleTexture());
+    this.scorchMat = decal(makeRadialTexture('rgba(0,0,0,0.85)', 'rgba(0,0,0,0)'));
     const dg = new THREE.PlaneGeometry(0.22, 0.22);
     for (let i = 0; i < 70; i++) {
       const m = new THREE.Mesh(dg, dm);
@@ -199,10 +202,24 @@ export class Effects {
     this.glow.emit(p.x, p.y, p.z, 0, 0, 0, { life: 0.08, size: 0.5, sizeEnd: 0.1, r: r * 0.6, g: g * 0.6, b: b * 0.6 });
   }
 
-  puff(p: THREE.Vector3, count: number, size = 0.5, shade = 0.22) {
+  puff(p: THREE.Vector3, count: number, size = 0.5, shade = 0.22, linger = 1) {
     for (let i = 0; i < count; i++)
-      this.smoke.emit(p.x + rnd(0.15), p.y + rnd(0.15), p.z + rnd(0.15), rnd(0.7), 0.4 + Math.random() * 0.8, rnd(0.7),
-        { life: 0.7 + Math.random() * 0.8, size: size * 0.5, sizeEnd: size * 1.8, drag: 1.5, r: shade, g: shade, b: shade * 1.05, a: 0.35 });
+      this.smoke.emit(p.x + rnd(0.15 * size), p.y + rnd(0.15 * size), p.z + rnd(0.15 * size), rnd(0.7), 0.4 + Math.random() * 0.8, rnd(0.7),
+        { life: (0.7 + Math.random() * 0.8) * linger, size: size * 0.5, sizeEnd: size * 1.8, drag: 1.5, r: shade, g: shade, b: shade * 1.05, a: 0.35 });
+  }
+
+  private nextDecal(mat: THREE.Material): THREE.Mesh {
+    const d = this.decals[this.decalIdx]; this.decalIdx = (this.decalIdx + 1) % this.decals.length;
+    d.material = mat; d.visible = true;
+    return d;
+  }
+
+  /** Burn mark left on the floor by an explosion. */
+  scorch(x: number, z: number, radius: number) {
+    const d = this.nextDecal(this.scorchMat);
+    d.position.set(x, 0.02, z);
+    d.rotation.set(-Math.PI / 2, 0, Math.random() * 6.28);
+    d.scale.setScalar(radius / 0.11);
   }
 
   trail(p: THREE.Vector3, r: number, g: number, b: number, size = 0.18) {
@@ -212,24 +229,30 @@ export class Effects {
   impact(p: THREE.Vector3, n: THREE.Vector3) {
     this.sparks(p, n, 7);
     this.puff(p, 1, 0.3, 0.3);
-    const d = this.decals[this.decalIdx]; this.decalIdx = (this.decalIdx + 1) % this.decals.length;
+    const d = this.nextDecal(this.holeMat);
     d.position.copy(p).addScaledVector(n, 0.012);
     d.quaternion.setFromUnitVectors(Z, n);
     d.rotateZ(Math.random() * 6.28);
     const s = 0.7 + Math.random() * 0.8;
     d.scale.set(s, s, s);
-    d.visible = true;
   }
 
   explosion(p: THREE.Vector3, scale = 1, r = 3.5, g = 1.6, b = 0.4) {
+    // Sparks, and a few slower embers that outlive the blast.
     for (let i = 0; i < 46 * scale; i++) {
       const v = new THREE.Vector3(rnd(1), rnd(1), rnd(1)).normalize().multiplyScalar(3 + Math.random() * 11 * scale);
-      this.glow.emit(p.x, p.y, p.z, v.x, v.y + 2, v.z, { life: 0.3 + Math.random() * 0.6, size: 0.09, sizeEnd: 0.01, gravity: 10, drag: 1.2, r, g, b });
+      this.glow.emit(p.x, p.y, p.z, v.x, v.y + 2, v.z, { life: 0.3 + Math.random() * 0.6, size: 0.09, sizeEnd: 0.01, gravity: 10, drag: 1.2, r, g, b, cool: 0.6 });
     }
-    for (let i = 0; i < 10 * scale; i++)
-      this.glow.emit(p.x + rnd(0.5 * scale), p.y + rnd(0.5 * scale), p.z + rnd(0.5 * scale), rnd(2), rnd(2) + 1, rnd(2),
-        { life: 0.25 + Math.random() * 0.25, size: 1.6 * scale, sizeEnd: 0.4, drag: 2, r: r * 0.5, g: g * 0.5, b: b * 0.5 });
+    for (let i = 0; i < 12 * scale; i++)
+      this.glow.emit(p.x, p.y, p.z, rnd(4 * scale), 2 + Math.random() * 5, rnd(4 * scale), { life: 0.9 + Math.random() * 1.1, size: 0.06, sizeEnd: 0.02, gravity: 5, drag: 0.7, r, g, b, cool: 0.9 });
+    // White-hot core, then a fireball that rolls outward and cools to red.
+    this.glow.emit(p.x, p.y, p.z, 0, 0, 0, { life: 0.1, size: 2.2 * scale, sizeEnd: 0.8, r: r * 0.7, g: r * 0.6, b: r * 0.42 });
+    for (let i = 0; i < 14 * scale; i++)
+      this.glow.emit(p.x + rnd(0.5 * scale), p.y + rnd(0.5 * scale), p.z + rnd(0.5 * scale), rnd(2.6 * scale), rnd(2) + 1.4, rnd(2.6 * scale),
+        { life: 0.3 + Math.random() * 0.35, size: 1.1 * scale, sizeEnd: 2.0 * scale, drag: 2.4, r: r * 0.24, g: g * 0.24, b: b * 0.24, cool: 1 });
     this.puff(p, Math.ceil(9 * scale), 1.3 * scale, 0.12);
+    this.puff(p, Math.ceil(5 * scale), 2.1 * scale, 0.07, 2.2);
+    if (p.y < 2.2) this.scorch(p.x, p.z, 1.5 * scale);
     this.flash(p, 0xffa040, 320 * scale, 0.35, 12 + 10 * scale);
     const bl = this.blasts.find((x) => x.life <= 0);
     if (bl) {

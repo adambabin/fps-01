@@ -19,6 +19,8 @@ const CARD_ARM_MS = 600;
 export interface UICallbacks {
   play(): void; resume(): void; restart(): void; quit(): void;
   settingsChanged(): void; pickUpgrade(i: number): void; click(): void;
+  /** Name of the connected controller, or '' when there is none. */
+  padName(): string;
 }
 
 export interface RadarBlip { x: number; z: number; kind: number; }
@@ -133,14 +135,14 @@ export class UI {
       const l = document.createElement('label'); l.textContent = label; r.append(l); body.append(r);
       return r;
     };
-    const slider = (label: string, key: 'sensitivity' | 'adsSensitivity' | 'fov' | 'volume', min: number, max: number, step: number, fmt: (v: number) => string) => {
+    const slider = (label: string, key: 'sensitivity' | 'adsSensitivity' | 'fov' | 'volume' | 'padSensitivity', min: number, max: number, step: number, fmt: (v: number) => string) => {
       const r = row(label), i = document.createElement('input'), v = document.createElement('span');
       i.type = 'range'; i.min = String(min); i.max = String(max); i.step = String(step); i.value = String(s[key]);
       v.className = 'val'; v.textContent = fmt(s[key]);
       i.addEventListener('input', () => { s[key] = Number(i.value); v.textContent = fmt(s[key]); this.commit(); });
       r.append(i, v);
     };
-    const check = (label: string, key: 'invertY' | 'adsToggle' | 'scrollSwitch' | 'rawInput' | 'showFps' | 'damageNumbers') => {
+    const check = (label: string, key: 'invertY' | 'adsToggle' | 'scrollSwitch' | 'rawInput' | 'showFps' | 'damageNumbers' | 'padVibration') => {
       const r = row(label), i = document.createElement('input');
       i.type = 'checkbox'; i.checked = s[key];
       // Link the text to the box so clicking anywhere on the label toggles it.
@@ -177,7 +179,16 @@ export class UI {
     check('Show damage numbers', 'damageNumbers');
     check('Show FPS counter', 'showFps');
 
-    head('CONTROLS — click a binding, then press a key or mouse button');
+    head('CONTROLLER');
+    const pad = this.cb.padName();
+    const note = document.createElement('div');
+    note.className = 's-note';
+    note.textContent = pad ? `Connected: ${pad}. Left stick moves, right stick looks; D-pad and A/B work in menus.` : 'No controller detected. Plug one in or pair it, then press any button on it.';
+    body.append(note);
+    slider('Controller look sensitivity', 'padSensitivity', 0.3, 3, 0.05, (v) => v.toFixed(2));
+    check('Controller vibration', 'padVibration');
+
+    head('CONTROLS — select a binding, then press a key or mouse button. The third column is the controller button.');
     for (const a of ACTIONS) {
       const r = row(ACTION_LABELS[a]), wrap = document.createElement('div');
       wrap.className = 'bind';
@@ -203,6 +214,29 @@ export class UI {
         });
         wrap.append(b);
       }
+      // Controller column. The sticks always move and look, so those four rows have no button.
+      const pb = document.createElement('button');
+      pb.className = 'pad';
+      pb.textContent = codeLabel(s.pad[a]);
+      if (a === 'forward' || a === 'back' || a === 'left' || a === 'right') { pb.textContent = 'Left Stick'; pb.disabled = true; }
+      pb.addEventListener('click', (ev) => {
+        ev.stopPropagation();
+        pb.classList.add('listening'); pb.textContent = 'Press button…';
+        setTimeout(() => {
+          this.input.capturePad = true;
+          this.input.capture = (code) => {
+            this.input.capturePad = false;
+            // Escape clears the binding; any other key or mouse press cancels.
+            if (code === 'Escape') s.pad[a] = '';
+            else if (code.startsWith('Pad')) {
+              for (const o of ACTIONS) if (s.pad[o] === code) s.pad[o] = '';
+              s.pad[a] = code;
+            }
+            this.commit(); this.buildSettings();
+          };
+        }, 0);
+      });
+      wrap.append(pb);
       r.append(wrap);
     }
   }
@@ -312,9 +346,11 @@ export class UI {
   update(dt: number, d: {
     health: number; maxHealth: number; armor: number; maxArmor: number; wave: number; remaining: number; score: number;
     weapons: WeaponSystem; spreadPx: number; ads: number; sprinting: boolean; fps: number; intermission: number; prompt: string; boss: number; bossName: string; best: number;
-    perks: string;
+    perks: string; lives: number; maxLives: number;
   }) {
     this.set('perks', d.perks);
+    this.set('lives', '♥'.repeat(Math.max(0, d.lives)) + '♡'.repeat(Math.max(0, d.maxLives - d.lives)));
+    $('lives').classList.toggle('last', d.lives <= 1);
     this.set('score-best', d.best <= 0 ? '' : d.score > d.best ? 'NEW BEST' : 'BEST ' + d.best.toLocaleString());
     $('score-best').classList.toggle('beaten', d.best > 0 && d.score > d.best);
     if (d.boss >= 0) { this.set('boss-name', d.bossName.toUpperCase()); this.set('np-name', d.bossName.toUpperCase()); $('np-fill').style.width = Math.max(0, d.boss) * 100 + '%'; }

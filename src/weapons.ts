@@ -163,6 +163,11 @@ export class WeaponSystem {
   }
 
   /** Adds reserve ammo to every unlocked weapon. Returns false if all were full. */
+  /** True when any unlocked weapon's reserve is below its cap. */
+  needsAmmo(): boolean {
+    return this.states.some((s, i) => s.unlocked && isFinite(s.reserve) && s.reserve < this.reserveMax(i));
+  }
+
   addAmmo(frac: number): boolean {
     let any = false;
     this.states.forEach((s, i) => {

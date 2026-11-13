@@ -9,6 +9,7 @@ import { Effects } from './effects';
 import { BOSSES } from './bosses';
 import { ENEMY_DEFS, EnemyManager, type Enemy, type EnemyCtx, type EnemyType } from './enemies';
 import { PICKUP_AMMO, PICKUP_ARMOR, PICKUP_GRENADE, PICKUP_HEALTH, Pickups, Projectiles, Shockwaves, type ProjCtx } from './entities';
+import { Gamepads } from './gamepad';
 import { Input } from './input';
 import { FlowField } from './nav';
 import { Objectives, type KillSource } from './objectives';
@@ -40,6 +41,8 @@ export const TRACKS: Track[] = ['firepower', 'survival', 'utility'];
 export type Keystone = 'overload' | 'spree' | 'laststand' | 'barrier' | 'combatslide' | 'fabricator' | 'doublejump';
 /** Cards taken in a track before its keystones are offered. */
 export const KEYSTONE_RANK = 3;
+/** Lives a run starts with, the most that can be held, and objectives completed per extra life. */
+export const START_LIVES = 3, MAX_LIVES = 5, OBJECTIVES_PER_LIFE = 3;
 
 interface Upgrade { name: string; desc: string; track?: Track; keystone?: Keystone; weapon?: boolean; bonus?: boolean; ok?(g: Game): boolean; apply(g: Game): void; }
 
@@ -111,6 +114,10 @@ export class Game {
   keystones = new Set<Keystone>();
   lastStandReady = false;
   barrierUp = false;
+  /** Deaths the run can still take, counting the current life; the run ends when it reaches 0. */
+  lives = START_LIVES;
+  /** Objectives completed since the last extra life they earned. */
+  private objStreak = 0;
   private spree = 0;
   private spreeT = 0;
   private fabT = 0;
@@ -155,6 +162,8 @@ export class Game {
   private promptShown = false;
   /** Phones and tablets: no pointer lock, on-screen controls instead. */
   private touch: TouchControls | null = null;
+  /** Controller input. While `pad.active` the game runs without mouse capture. */
+  pad: Gamepads;
 
   constructor(private canvas: HTMLCanvasElement) {
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: false, powerPreference: 'high-performance' });
@@ -186,6 +195,7 @@ export class Game {
       settingsChanged: () => this.applySettings(),
       pickUpgrade: (i) => this.pickUpgrade(i),
       click: () => { this.audio.unlock(); this.audio.ui(); },
+      padName: () => this.pad.name,
     });
     this.ui.setBest(loadHighScore());
 
@@ -215,11 +225,23 @@ export class Game {
       document.querySelector('#menu .hint')!.textContent = 'Left thumb: move (push to the rim to sprint) · Right thumb: drag to look · Hold FIRE and drag to shoot while aiming · Hold AIM for sights (or set toggle aim in Settings) · Play in landscape';
       document.querySelector('#upgrade .hint')!.textContent = 'Tap a card · Taking three cards from one track unlocks a choice of its keystones ◆';
     }
+    this.pad = new Gamepads(this.input, this.settings, {
+      // B backs out of a sub-screen, or out of the pause menu into the game.
+      back: () => { if (!this.ui.back() && this.state === 'paused' && this.ui.current === 'pause') { this.audio.ui(); this.resume(); } },
+      start: () => { if (this.state === 'paused' && this.ui.current === 'pause') { this.audio.ui(); this.resume(); } },
+      lost: () => { if (this.state === 'playing' && document.pointerLockElement !== this.canvas) this.pause(); },
+    });
     this.input.lookActive = () => this.state === 'playing' && this.locked();
+    // A free cursor must not turn the view or fire while a controller is driving the game.
+    this.input.mouseActive = () => !this.pad.active || !!document.pointerLockElement;
+    // Any mouse button hands control back to the mouse (registered after Input's own listener,
+    // so the click that does it is not also a shot).
+    window.addEventListener('mousedown', () => this.pad.release(), true);
     document.addEventListener('pointerlockchange', () => {
       this.lockPending = false; this.unlockedSince = 0;
       if (this.locked() && this.promptShown) { this.promptShown = false; this.ui.clearAnnounce(); }
-      if (!this.locked() && this.state === 'playing') this.pause();
+      // Losing capture always pauses, even if a controller press has since been seen.
+      if (document.pointerLockElement !== this.canvas && !this.touch && !this.test && this.state === 'playing') this.pause();
     });
     document.addEventListener('pointerlockerror', () => { if (!this.lockRetry && this.state === 'playing' && !this.locked()) this.pause(); });
     canvas.addEventListener('click', () => { if (this.state === 'playing' && !this.locked()) this.requestLock(); });
@@ -242,12 +264,13 @@ export class Game {
 
   // ---------- setup ----------
   /** Whether input is captured. Touch devices have no pointer lock and are always engaged. */
-  private locked(): boolean { return this.test || !!this.touch || document.pointerLockElement === this.canvas; }
+  private locked(): boolean { return this.test || !!this.touch || this.pad.active || document.pointerLockElement === this.canvas; }
 
   /** Captures the mouse, or on touch devices brings up the on-screen controls instead. */
   private requestLock() {
     if (this.touch) { this.touch.show(true); return; }
-    if (this.test) return;
+    // A controller press is not a gesture browsers accept for mouse capture, and none is needed.
+    if (this.test || this.pad.active) return;
     this.lockPending = true;
     const fail = () => { this.lockRetry = false; this.lockPending = false; if (this.state === 'playing' && !this.locked()) this.pause(); };
     try {
@@ -356,7 +379,8 @@ export class Game {
     this.pickupReach = 3.2; this.dropMult = 1;
     this.ranks = { firepower: 0, survival: 0, utility: 0 }; this.keystones.clear();
     this.lastStandReady = this.barrierUp = false; this.spree = this.spreeT = this.fabT = 0;
-    this.queue = []; this.clearT = 0; this.intermission = 2.5; this.awaitReady = false; this.pickups.hold = false; this.touch?.showReady(false);
+    this.lives = START_LIVES; this.objStreak = 0;
+    this.queue = []; this.clearT = 0; this.intermission = 2.5; this.awaitReady = false; this.touch?.showReady(false);
     this.state = 'playing';
     this.weapons.scene.visible = true;
     this.ui.show(null); this.ui.showHud(true);
@@ -515,7 +539,9 @@ export class Game {
 
   /** HUD line while waiting to travel; touch players have a NEXT ARENA button right below it. */
   private readyPrompt(): string {
-    return this.touch ? 'GRAB YOUR DROPS' : `PRESS ${codeLabel(this.settings.binds.ready[0]).toUpperCase()} FOR THE NEXT ARENA`;
+    if (this.touch) return 'GRAB YOUR DROPS';
+    const code = this.pad.active && this.settings.pad.ready ? this.settings.pad.ready : this.settings.binds.ready[0];
+    return `PRESS ${codeLabel(code).toUpperCase()} FOR THE NEXT ARENA`;
   }
 
   private pickUpgrade(i: number) {
@@ -533,7 +559,7 @@ export class Game {
     this.ui.show(null);
     // Before an arena change, wait for the player so they can collect the boss's drops first.
     if (this.settings.rotate && this.wave % 5 === 0) {
-      this.intermission = 0; this.awaitReady = this.pickups.hold = true;
+      this.intermission = 0; this.awaitReady = true;
       this.touch?.showReady(true);
       this.ui.announce('BOSS DOWN', this.readyPrompt(), 3);
     }
@@ -581,7 +607,13 @@ export class Game {
       p.health = 1; p.invuln = 2; this.lastStandReady = false;
       this.ui.announce('LAST STAND', 'INVULNERABLE', 1.4);
       this.audio.alarm();
+    } else if (p.dead && --this.lives > 0) {
+      // A spare life: back on your feet where you fell, with a moment to get clear.
+      p.health = p.maxHealth; p.invuln = 2.5;
+      this.ui.announce('LIFE LOST', this.lives === 1 ? 'LAST LIFE' : `${this.lives} LIVES LEFT`, 2);
+      this.audio.alarm();
     }
+    this.pad.rumble(Math.min(1, 0.35 + amount / 40), 160);
     this.audio.hurt();
     this.ui.damageFlash(amount);
     const dx = from.x - this.player.pos.x, dz = from.z - this.player.pos.z;
@@ -605,11 +637,23 @@ export class Game {
     this.score += bonus;
     this.bonusCard = true;
     this.audio.objective(true);
-    this.ui.announce('OBJECTIVE COMPLETE', `+${bonus} · SUPPLY DROP · EXTRA UPGRADE CHOICE`, 2.4);
+    let life = false;
+    if (++this.objStreak >= OBJECTIVES_PER_LIFE) { this.objStreak = 0; life = this.addLife(); }
+    else if (this.lives < MAX_LIVES) this.ui.feed(`Extra life in <b>${OBJECTIVES_PER_LIFE - this.objStreak}</b> more objective${OBJECTIVES_PER_LIFE - this.objStreak === 1 ? '' : 's'}`);
+    this.ui.announce('OBJECTIVE COMPLETE', `+${bonus} · SUPPLY DROP · EXTRA UPGRADE CHOICE${life ? ' · EXTRA LIFE' : ''}`, 2.4);
     [PICKUP_HEALTH, PICKUP_AMMO, PICKUP_ARMOR].forEach((k, i) => {
       const a = p.yaw + (i - 1) * 0.7;
       this.pickups.spawn(k, tmpA.set(p.pos.x - Math.sin(a) * 2.2, 0.5, p.pos.z - Math.cos(a) * 2.2));
     });
+  }
+
+  /** Grants a life unless the cap is reached. Returns true if one was added. */
+  private addLife(): boolean {
+    if (this.lives >= MAX_LIVES) { this.ui.feed('Lives already at maximum'); return false; }
+    this.lives++;
+    this.audio.objective(true);
+    this.ui.feed('<b>Extra life</b>');
+    return true;
   }
 
   /** Strikes every robot in a short cone in front of the camera. */
@@ -657,7 +701,7 @@ export class Game {
     if (crit && src === 'bullet' && this.has('overload')) this.explode(e.center(new THREE.Vector3()), 4.5, 85 * this.weapons.mods.damage, 0);
     const p = e.center(tmpC).clone();
     p.y = 0.5;
-    if (e.type === 'boss') { this.boss = null; this.ui.announce(`${e.label.toUpperCase()} DESTROYED`, `+${pts}`, 2.5); }
+    if (e.type === 'boss') { this.boss = null; const life = this.addLife(); this.ui.announce(`${e.label.toUpperCase()} DESTROYED`, `+${pts}${life ? ' · EXTRA LIFE' : ''}`, 2.5); }
     const drops = e.type === 'boss' ? 7 : e.type === 'heavy' ? 3 : 1;
     for (let i = 0; i < drops; i++) {
       const r = Math.random(), hurt = this.player.health < this.player.maxHealth * 0.5;
@@ -672,15 +716,21 @@ export class Game {
     }
   }
 
-  private collect(kind: number): boolean {
+  /** Whether a drop of this kind would do anything; full stats leave it on the ground. */
+  private wantsPickup(kind: number): boolean {
     const p = this.player, w = this.weapons;
-    let ok = false, label = '';
-    if (kind === PICKUP_HEALTH && p.health < p.maxHealth) { p.health = Math.min(p.maxHealth, p.health + 25); ok = true; label = '+25 Health'; }
-    else if (kind === PICKUP_ARMOR && p.armor < p.maxArmor) { p.armor = Math.min(p.maxArmor, p.armor + 30); ok = true; label = '+30 Armor'; }
-    else if (kind === PICKUP_AMMO) { ok = w.addAmmo(0.3); label = 'Ammo'; }
-    else if (kind === PICKUP_GRENADE && w.grenades < w.maxGrenades) { w.grenades++; ok = true; label = '+1 Grenade'; }
-    if (ok) { this.audio.pickup(kind); this.ui.feed(label); }
-    return ok;
+    return kind === PICKUP_HEALTH ? p.health < p.maxHealth : kind === PICKUP_ARMOR ? p.armor < p.maxArmor
+      : kind === PICKUP_AMMO ? w.needsAmmo() : w.grenades < w.maxGrenades;
+  }
+
+  private collect(kind: number) {
+    const p = this.player, w = this.weapons;
+    let label = '';
+    if (kind === PICKUP_HEALTH) { p.health = Math.min(p.maxHealth, p.health + 25); label = '+25 Health'; }
+    else if (kind === PICKUP_ARMOR) { p.armor = Math.min(p.maxArmor, p.armor + 30); label = '+30 Armor'; }
+    else if (kind === PICKUP_AMMO) { w.addAmmo(0.3); label = 'Ammo'; }
+    else { w.grenades++; label = '+1 Grenade'; }
+    this.audio.pickup(kind); this.ui.feed(label);
   }
 
   private explode(pos: THREE.Vector3, radius: number, dmgEnemy: number, dmgPlayer: number) {
@@ -709,6 +759,7 @@ export class Game {
     const dt = Math.min(raw, 0.05);
     this.time += dt;
     this.world.update(this.time, dt, this.camera.position);
+    this.pad.poll(raw, this.state === 'playing');
 
     if (this.state === 'playing' && this.locked()) {
       this.unlockedSince = 0;
@@ -807,7 +858,7 @@ export class Game {
 
     this.enemies.update(dt, this.enemyCtx);
     this.projectiles.update(dt, this.projCtx);
-    this.pickups.update(dt, p, (k) => this.collect(k), this.pickupReach);
+    this.pickups.update(dt, p, (k) => this.wantsPickup(k), (k) => this.collect(k), this.pickupReach);
     this.shockwaves.update(dt, p, (a, from) => this.hurtPlayer(a, from));
     const res = this.objectives.update(dt, p);
     if (res === 'done') this.objectiveDone();
@@ -818,7 +869,7 @@ export class Game {
     // Wave director
     if (this.awaitReady) {
       if (this.input.wasPressed('ready')) {
-        this.awaitReady = this.pickups.hold = false;
+        this.awaitReady = false;
         this.touch?.showReady(false);
         this.travel(); this.intermission = 5;
       }
@@ -851,7 +902,7 @@ export class Game {
       remaining: this.enemies.list.length + this.queue.length, score: this.score, weapons: w, spreadPx, ads: w.ads,
       sprinting: p.sprinting, fps: this.fps, intermission: this.intermission,
       prompt: this.awaitReady ? this.readyPrompt() : '',
-      best: this.best, perks: this.perkStatus(),
+      best: this.best, perks: this.perkStatus(), lives: this.lives, maxLives: MAX_LIVES,
       boss: this.boss && this.boss.alive ? this.boss.hp / this.boss.maxHp : -1, bossName: this.boss ? this.boss.label : '',
     });
     const sy = Math.sin(p.yaw), cy = Math.cos(p.yaw), blips: RadarBlip[] = [];

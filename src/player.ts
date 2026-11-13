@@ -7,6 +7,8 @@ import type { Settings } from './settings';
 const STAND = 1.8, CROUCH = 1.15, RADIUS = 0.35;
 const WALK = 5.0, SPRINT = 7.6, CROUCH_SPEED = 2.6, ADS_SPEED = 3.2;
 const GRAVITY = 22, JUMP = 7.3;
+/** Jumping out of a slide multiplies its speed by this, up to SLIDE_JUMP_MAX m/s. */
+const SLIDE_JUMP_BOOST = 1.2, SLIDE_JUMP_MAX = 12.5;
 
 export class Player {
   pos = new THREE.Vector3(0, 0, 9);
@@ -169,6 +171,13 @@ export class Player {
     this.jumpBuf = input.wasPressed('jump') ? 0.12 : this.jumpBuf - dt;
     if (this.grounded) this.airLeft = this.airJumps;
     if (this.jumpBuf > 0 && this.coyote > 0) {
+      if (this.sliding) {
+        // Slide jump: leave the slide with a burst on top of its momentum, capped so
+        // chaining slides and jumps cannot keep stacking speed.
+        const hs = Math.hypot(this.vel.x, this.vel.z), boosted = Math.min(hs * SLIDE_JUMP_BOOST, SLIDE_JUMP_MAX * this.speedMult);
+        if (hs > 0.01 && boosted > hs) { this.vel.x *= boosted / hs; this.vel.z *= boosted / hs; }
+        this.sliding = false; this.slideCd = 0.35;
+      }
       this.vel.y = JUMP; this.grounded = false; this.coyote = 0; this.jumpBuf = 0;
       this.audio.jump();
     } else if (this.jumpBuf > 0 && !this.grounded && this.airLeft > 0) {

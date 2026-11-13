@@ -58,7 +58,7 @@ There is no lint config and no test suite. Verification is done by driving the b
 
 **Reloads** are choreographed in `weapons.ts` (`reloadPose`, `reloadSteps`) as functions of reload progress, so they stay in step at any reload speed. Each gun's `ReloadSpec` (`gunModels.ts`) picks a style (`mag`, `shells`, `cylinder`) and gives the support-hand offsets to the magazine and the slide or charging handle, plus the gun's tilt and lift. Sounds play as the animation reaches each step; the shotgun gains one shell per step. Empty reloads add a rack. Reload durations in `WEAPONS` are unchanged by the animation.
 
-**Melee and slide.** Melee is a timed swing in `WeaponSystem` that calls `FireCtx.melee` part-way through; `Game.melee()` does the cone test. Sliding lives in `Player.update`: pressing crouch while sprinting replaces ground movement with a decaying slide velocity until it ends or is jumped out of.
+**Melee and slide.** Melee is a timed swing in `WeaponSystem` that calls `FireCtx.melee` part-way through; `Game.melee()` does the cone test. Sliding lives in `Player.update`: pressing crouch while sprinting replaces ground movement with a decaying slide velocity until it ends or is jumped out of. Jumping out of a slide multiplies its speed by `SLIDE_JUMP_BOOST` (1.2), capped at `SLIDE_JUMP_MAX` (12.5 m/s) so chained slide jumps cannot keep stacking.
 
 **Navigation** is one shared flow field (`nav.ts`): a BFS from the player's cell over a 64×64 grid, recomputed every 0.2 s. Ground robots follow it unless they have line of sight. Blocked cells are derived from collision boxes at construction, so it must be rebuilt whenever the arena changes.
 

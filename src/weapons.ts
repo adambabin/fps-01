@@ -89,19 +89,40 @@ interface ReloadStep { p: number; kind: StepKind; }
  * slide, charging handle or pump; a partial one skips it.
  */
 const MAG = { grab: 0.16, out: 0.22, down: [0.24, 0.36], up: [0.38, 0.54], seat: [0.54, 0.6], toRack: [0.64, 0.74], pull: [0.74, 0.8], back: [0.82, 0.96], backTac: [0.64, 0.84] };
-const CYL = { open: 0.14, load: 0.56, close: 0.75 };
+/** Cylinder: swings out at `open`, rounds go in between `start` and `end`, snaps shut at `close`. */
+const CYL = { open: 0.14, start: 0.2, end: 0.72, close: 0.78 };
 /** Shotgun: shells are loaded between these points; an empty one is pumped at `pump`. */
 const SHELLS = { start: 0.12, end: 0.88, endEmpty: 0.78, pump: 0.86 };
 
-function shellCycle(empty: boolean, rounds: number) {
-  const n = Math.max(1, rounds), end = empty ? SHELLS.endEmpty : SHELLS.end;
-  return { n, len: (end - SHELLS.start) / n };
+/**
+ * Reload styles that load one round at a time. Each round adds to the magazine as it goes in,
+ * and pressing fire with at least one round loaded cuts the reload short.
+ */
+export const ROUND_BY_ROUND: ReadonlySet<ReloadSpec['style']> = new Set(['shells', 'cylinder']);
+
+/** Splits [start, end] into one loading cycle per round. */
+function roundCycle(start: number, end: number, rounds: number) {
+  const n = Math.max(1, rounds);
+  return { n, len: (end - start) / n };
+}
+const shellCycle = (empty: boolean, rounds: number) => roundCycle(SHELLS.start, empty ? SHELLS.endEmpty : SHELLS.end, rounds);
+
+/** Hand path for loading round i of a round-by-round reload: down to fetch it, up to the port, push it in. */
+function loadRound(hand: V3, q: number, reach: V3, fetch: V3, ready: V3): V3 {
+  hand = toward(hand, fetch, ss(q, 0, 0.35));
+  hand = toward(hand, ready, ss(q, 0.35, 0.72));
+  return toward(hand, reach, ss(q, 0.72, 0.9));
 }
 
 /** Sound and ammo steps for a reload, in progress order. */
 function reloadSteps(style: ReloadSpec['style'], empty: boolean, rounds: number): ReloadStep[] {
   if (style === 'mag') return [{ p: MAG.grab, kind: 'grab' }, { p: MAG.out, kind: 'out' }, { p: MAG.seat[1], kind: 'in' }, ...(empty ? [{ p: MAG.pull[1], kind: 'rack' as const }] : [])];
-  if (style === 'cylinder') return [{ p: CYL.open, kind: 'open' }, { p: CYL.load, kind: 'in' }, { p: CYL.close, kind: 'close' }];
+  if (style === 'cylinder') {
+    const { n, len } = roundCycle(CYL.start, CYL.end, rounds), steps: ReloadStep[] = [{ p: CYL.open, kind: 'open' }];
+    for (let i = 0; i < n; i++) steps.push({ p: CYL.start + (i + 0.9) * len, kind: 'shell' });
+    steps.push({ p: CYL.close, kind: 'close' });
+    return steps;
+  }
   const { n, len } = shellCycle(empty, rounds), steps: ReloadStep[] = [];
   for (let i = 0; i < n; i++) steps.push({ p: SHELLS.start + (i + 0.9) * len, kind: 'shell' });
   if (empty) steps.push({ p: SHELLS.pump, kind: 'rack' });
@@ -163,9 +184,7 @@ function reloadPose(spec: ReloadSpec, p: number, empty: boolean, rounds: number,
     const i = Math.min(n - 1, Math.max(0, Math.floor((p - SHELLS.start) / len)));
     const q = (p - SHELLS.start - i * len) / len;
     if (p >= SHELLS.start && q <= 1) {
-      hand = toward(hand, fetch, ss(q, 0, 0.35));
-      hand = toward(hand, ready, ss(q, 0.35, 0.72));
-      hand = toward(hand, reach, ss(q, 0.72, 0.9));
+      hand = loadRound(hand, q, reach, fetch, ready);
       held = q > 0.3 && q < 0.9;
       bump += 0.4 * jolt(q, 0.9, dur * len);
     }
@@ -178,18 +197,23 @@ function reloadPose(spec: ReloadSpec, p: number, empty: boolean, rounds: number,
       tiltOut = 1 - ss(p, 0.84, 1);
     }
   } else {
-    // Cylinder: the hand pushes it out, fetches a speed loader, loads, and the gun flicks it shut.
-    const swing = ss(p, 0.1, 0.18) * (1 - ss(p, CYL.close - 0.03, CYL.close));
+    // Cylinder: swing it out, load rounds one at a time (turning a chamber per round), flick it shut.
+    const { n, len } = roundCycle(CYL.start, CYL.end, rounds);
+    const swing = ss(p, 0.08, 0.16) * (1 - ss(p, CYL.close - 0.03, CYL.close));
     mag = [-0.075 * swing, -0.012 * swing, 0];
-    magRot = [0, 8 * Math.PI * ss(p, CYL.open, CYL.close)];
+    const r = (p - CYL.start) / len, whole = Math.floor(r);
+    const turned = r < 0 ? 0 : Math.min(n, whole + ss(r - whole, 0.9, 1));
+    magRot = [0, 2 * Math.PI * ss(p, 0.08, 0.16) + (Math.PI / 3) * turned];
     hand = toward(hand, reach, ss(p, 0.03, CYL.open));
-    hand = toward(hand, add(reach, [-0.02, -0.35, 0.08]), ss(p, 0.2, 0.32));
-    hand = toward(hand, add(reach, [0, 0, 0.08]), ss(p, 0.34, 0.5));
-    hand = toward(hand, add(reach, [0, 0, 0.035]), ss(p, 0.5, CYL.load));
-    hand = toward(hand, add(reach, [-0.04, -0.12, 0.1]), ss(p, 0.6, 0.7));
-    hand = toward(hand, ZERO3, ss(p, 0.76, 0.9));
-    bump += jolt(p, CYL.load, dur) * 0.5 - jolt(p, CYL.close, dur) * 1.2;
-    tiltOut = 1 - ss(p, 0.78, 1);
+    const i = Math.min(n - 1, Math.max(0, whole)), q = r - i;
+    if (r >= 0 && q <= 1) {
+      hand = loadRound(hand, q, add(reach, [0, 0, 0.035]), add(reach, [-0.02, -0.3, 0.1]), add(reach, [0, 0, 0.09]));
+      held = q > 0.3 && q < 0.9;
+      bump += 0.3 * jolt(q, 0.9, dur * len);
+    }
+    hand = toward(hand, ZERO3, ss(p, CYL.end, CYL.close + 0.1));
+    bump -= jolt(p, CYL.close, dur) * 1.2;
+    tiltOut = 1 - ss(p, CYL.close + 0.02, 1);
   }
 
   const t = tiltIn * tiltOut;
@@ -447,9 +471,13 @@ export class WeaponSystem {
     const trigger = def.auto ? input.isDown('fire') : this.fireBuf > 0;
     this.wantsFire = trigger || input.isDown('fire');
     this.sprintT += ((player.sprinting ? 1 : 0) - this.sprintT) * Math.min(1, dt * 10);
-    // A shotgun loading shells one at a time can be fired mid-reload if a shell is chambered.
-    const canCut = this.reloading && st.ammo > 0 && this.guns[this.current].reload.style === 'shells' && input.wasPressed('fire');
-    if (canCut) { this.reloadT = 0; this.reloadSteps = []; this.cutT = CUT_TIME; }
+    // A gun loading rounds one at a time can be fired mid-reload once a round is in.
+    const style = this.guns[this.current].reload.style;
+    const canCut = this.reloading && st.ammo > 0 && ROUND_BY_ROUND.has(style) && input.wasPressed('fire');
+    if (canCut) {
+      this.reloadT = 0; this.reloadSteps = []; this.cutT = CUT_TIME;
+      if (style === 'cylinder') c.audio.reloadStep('close');
+    }
     if (trigger && !busy && !this.reloading && this.cooldown <= 0 && this.sprintT < 0.5) {
       if (st.ammo > 0) {
         this.fireBuf = 0;

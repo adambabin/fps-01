@@ -79,8 +79,9 @@ export interface GunModel {
 
 /**
  * How a gun reloads. Offsets are in model space, relative to the support hand's rest pose.
- * `mag`: drop the magazine and seat a fresh one; `shells`: load rounds one at a time;
- * `cylinder`: swing the cylinder out, load it and snap it shut.
+ * `mag`: drop the magazine and seat a fresh one; `shells`: load shells one at a time;
+ * `cylinder`: swing the cylinder out, load rounds one at a time and snap it shut.
+ * Round-by-round styles (`ROUND_BY_ROUND` in weapons.ts) can be cut short by firing.
  */
 export interface ReloadSpec {
   style: 'mag' | 'shells' | 'cylinder';
@@ -347,7 +348,7 @@ function smg(): GunModel {
 
 function launcher(): GunModel {
   const r = rig();
-  r.node('mag', 'root').node('off', 'root');
+  r.node('mag', 'root').node('off', 'root').node('held', 'off');
   r.add('root', 'plate', cyl(0.031, 0.36, 'z', 16), { p: [0, 0.02, -0.33] })
     .add('root', 'dark', cyl(0.025, 0.362, 'z', 16), { p: [0, 0.02, -0.331] })
     .add('root', 'black', cyl(0.035, 0.03, 'z', 16), { p: [0, 0.02, -0.5] })
@@ -377,9 +378,12 @@ function launcher(): GunModel {
   }
   gripHand(r, 'root', -0.088, 0.105);
   supportHand(r, 'off', -0.048, -0.3, 0.023);
+  // A round held in the fingertips while loading the cylinder.
+  r.add('held', 'plate', cyl(0.0155, 0.05, 'z', 10), { p: [0, -0.016, -0.325] })
+    .add('held', 'brass', cyl(0.016, 0.012, 'z', 10), { p: [0, -0.016, -0.294] });
   const node = (n: string) => r.root.getObjectByName(n)!;
   return {
-    group: r.bake(), muzzle: new THREE.Vector3(0, 0.02, -0.53), sightY: 0.102, mag: node('mag'), off: node('off'),
+    group: r.bake(), muzzle: new THREE.Vector3(0, 0.02, -0.53), sightY: 0.102, mag: node('mag'), off: node('off'), held: node('held'),
     reload: { style: 'cylinder', reach: [-0.08, 0.03, 0.2], tilt: [0.12, -0.55] },
   };
 }

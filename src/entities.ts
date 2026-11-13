@@ -148,17 +148,21 @@ export class Shockwaves {
     }
   }
 
-  spawn(x: number, z: number, dmg: number) {
+  spawn(x: number, z: number, dmg: number, floor = 0) {
     const w = this.list.find((q) => !q.active);
     if (!w) return;
     w.active = true; w.hit = false; w.r = 1.5; w.dmg = dmg;
-    w.mesh.position.set(x, 0.12, z);
+    w.mesh.position.set(x, floor + 0.12, z);
     w.mesh.visible = true;
   }
 
   clear() { for (const w of this.list) { w.active = false; w.mesh.visible = false; } }
 
-  update(dt: number, player: Player, hurt: (amount: number, from: THREE.Vector3) => void) {
+  /**
+   * `floor` is the height of the surface under the player. The pulse sweeps every level, so the
+   * ring is drawn on the player's floor and is dodged by being in the air above it.
+   */
+  update(dt: number, player: Player, floor: number, hurt: (amount: number, from: THREE.Vector3) => void) {
     for (const w of this.list) {
       if (!w.active) continue;
       w.r += Shockwaves.SPEED * dt;
@@ -166,7 +170,8 @@ export class Shockwaves {
       w.mesh.scale.set(w.r, 1, w.r);
       w.mat.color.setRGB(5 * k, 1.6 * k, 0.3 * k);
       const d = Math.hypot(player.pos.x - w.mesh.position.x, player.pos.z - w.mesh.position.z);
-      if (!w.hit && Math.abs(d - w.r) < 0.6 && player.pos.y < 0.45) { w.hit = true; hurt(w.dmg * Math.max(0.4, k), w.mesh.position); }
+      w.mesh.position.y += (floor + 0.12 - w.mesh.position.y) * Math.min(1, dt * 6);
+      if (!w.hit && Math.abs(d - w.r) < 0.6 && player.pos.y - floor < 0.45) { w.hit = true; hurt(w.dmg * Math.max(0.4, k), w.mesh.position); }
       if (w.r >= Shockwaves.MAX) { w.active = false; w.mesh.visible = false; }
     }
   }
@@ -264,7 +269,7 @@ export class Pickups {
     }
     if (!p) return;
     p.active = true; p.born = this.t;
-    p.baseY = Math.max(0.5, Math.min(pos.y, 1.2));
+    p.baseY = Math.max(0.5, pos.y);
     p.group.position.set(pos.x, p.baseY, pos.z);
     p.group.visible = true;
   }
@@ -285,7 +290,7 @@ export class Pickups {
       g.position.y = p.baseY + Math.sin(this.t * 3 + p.born * 7) * 0.08;
       if (!want[p.kind]) continue;
       const dx = player.pos.x - g.position.x, dz = player.pos.z - g.position.z, d = Math.hypot(dx, dz);
-      if (d < reach && d > 0.01) { const v = 7 * Math.max(1, reach / 3.2); g.position.x += (dx / d) * dt * v; g.position.z += (dz / d) * dt * v; }
+      if (d < reach && d > 0.01 && Math.abs(player.pos.y + 0.5 - g.position.y) < 2) { const v = 7 * Math.max(1, reach / 3.2); g.position.x += (dx / d) * dt * v; g.position.z += (dz / d) * dt * v; }
       if (d < 1.1 && Math.abs(player.pos.y + 0.9 - g.position.y) < 1.8) {
         collect(p.kind);
         want[p.kind] = wants(p.kind);

@@ -130,7 +130,7 @@ export class Objectives {
     const o = this.current;
     if (!o || o.status !== 'active') return null;
     if (o.kind === 'hold') {
-      const inside = Math.hypot(player.pos.x - o.pos!.x, player.pos.z - o.pos!.z) < ZONE_R;
+      const inside = Math.hypot(player.pos.x - o.pos!.x, player.pos.z - o.pos!.z) < ZONE_R && Math.abs(player.pos.y - o.pos!.y) < 1.5;
       if (inside) o.progress += dt;
       const k = (inside ? 1.5 : 0.8) + Math.sin(this.t * 4) * 0.2;
       this.zoneMat.color.setRGB(0.4 * k, 3 * k, 1.3 * k);

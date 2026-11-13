@@ -7,6 +7,15 @@ import type { Settings } from './settings';
 const STAND = 1.8, CROUCH = 1.15, RADIUS = 0.35;
 const WALK = 5.0, SPRINT = 7.6, CROUCH_SPEED = 2.6, ADS_SPEED = 3.2;
 const GRAVITY = 22, JUMP = 7.3;
+/** Tallest ledge walked up without jumping (stair treads are 0.2). */
+const STEP = 0.35;
+/**
+ * Fall damage from landing speed: nothing below SAFE_FALL (a drop of about 4 m, so one level
+ * plus a jump is free), then rising faster the harder the landing (~15 from 6 m, ~40 from 9 m).
+ */
+const SAFE_FALL = 13.2;
+/** Jumping out of a slide multiplies its speed by this, up to SLIDE_JUMP_MAX m/s. */
+const SLIDE_JUMP_BOOST = 1.2, SLIDE_JUMP_MAX = 12.5;
 
 export class Player {
   pos = new THREE.Vector3(0, 0, 9);
@@ -41,9 +50,15 @@ export class Player {
   private airLeft = 0;
   /** True on the frame a slide begins. */
   slideStarted = false;
+  /** Damage from a hard landing this frame; the game applies it and clears it. */
+  fallDamage = 0;
+  /** Eye offset that eases out after a step up or down, so stairs do not jolt the view. */
+  private stepEase = 0;
   /** Seconds since the last hit taken. */
   sinceHit = 99;
   shake = 0;
+  /** Visual roll from weapon recoil; never changes where you aim. */
+  punch = 0;
   /** 0..1 horizontal speed relative to walking, for spread and bob. */
   moveAmt = 0;
   bobPhase = 0;
@@ -62,13 +77,32 @@ export class Player {
     this.pos.set(0, 0, 9); this.vel.set(0, 0, 0);
     this.yaw = Math.PI; this.pitch = 0; this.recoilPitch = this.recoilYaw = 0;
     this.maxHealth = 100; this.health = 100; this.armor = 0; this.maxArmor = 100;
-    this.speedMult = 1; this.regen = 0; this.sinceHit = 99; this.shake = 0;
+    this.speedMult = 1; this.regen = 0; this.sinceHit = 99; this.shake = 0; this.punch = 0;
     this.crouching = false; this.height = STAND; this.crouchT = 0; this.landDip = 0;
     this.sliding = false; this.slideCd = 0;
     this.invuln = 0; this.airJumps = this.airLeft = 0; this.slideStarted = false;
+    this.fallDamage = this.stepEase = 0; this.grounded = true;
   }
 
-  get eye(): number { return 1.62 + (1.0 - 1.62) * this.crouchT - this.landDip; }
+  get eye(): number { return 1.62 + (1.0 - 1.62) * this.crouchT - this.landDip + this.stepEase; }
+
+  /**
+   * After a sideways move was blocked: tries the same move from one step higher and settles
+   * back down, which walks the player up stairs and low ledges. Returns true if it worked.
+   */
+  private stepUp(axis: 0 | 2, amt: number): boolean {
+    const c = this.c, h = this.h, x = c.x, y = c.y, z = c.z;
+    c.y += STEP;
+    if (!this.world.overlaps(c, h)) {
+      const blocked = this.world.moveAxis(c, h, axis, Math.sign(amt) * Math.max(Math.abs(amt), 0.02));
+      if (!blocked && this.world.moveAxis(c, h, 1, -STEP - 0.01) && c.y > y + 0.01) {
+        this.stepEase = Math.max(-0.5, this.stepEase - (c.y - y));
+        return true;
+      }
+    }
+    c.set(x, y, z);
+    return false;
+  }
   get dead(): boolean { return this.health <= 0; }
 
   /** Applies damage through armor. Returns the health actually lost. */
@@ -93,7 +127,7 @@ export class Player {
     this.pitch = Math.max(-1.54, Math.min(1.54, this.pitch));
     // Recoil settles slowly while the trigger is held, so sustained fire climbs and must
     // be pulled down, then snaps back once you let go.
-    const rec = Math.exp(-(wantsFire ? 4.5 : 11) * dt);
+    const rec = Math.exp(-(wantsFire ? 3.2 : 11) * dt);
     this.recoilPitch *= rec; this.recoilYaw *= rec;
 
     // Slide: crouch while sprinting. Carries momentum, keeps a low profile, and can be
@@ -167,6 +201,13 @@ export class Player {
     this.jumpBuf = input.wasPressed('jump') ? 0.12 : this.jumpBuf - dt;
     if (this.grounded) this.airLeft = this.airJumps;
     if (this.jumpBuf > 0 && this.coyote > 0) {
+      if (this.sliding) {
+        // Slide jump: leave the slide with a burst on top of its momentum, capped so
+        // chaining slides and jumps cannot keep stacking speed.
+        const hs = Math.hypot(this.vel.x, this.vel.z), boosted = Math.min(hs * SLIDE_JUMP_BOOST, SLIDE_JUMP_MAX * this.speedMult);
+        if (hs > 0.01 && boosted > hs) { this.vel.x *= boosted / hs; this.vel.z *= boosted / hs; }
+        this.sliding = false; this.slideCd = 0.35;
+      }
       this.vel.y = JUMP; this.grounded = false; this.coyote = 0; this.jumpBuf = 0;
       this.audio.jump();
     } else if (this.jumpBuf > 0 && !this.grounded && this.airLeft > 0) {
@@ -179,8 +220,9 @@ export class Player {
     const hh = this.height / 2;
     this.h.set(RADIUS, hh, RADIUS);
     this.c.set(this.pos.x, this.pos.y + hh, this.pos.z);
-    if (this.world.moveAxis(this.c, this.h, 0, this.vel.x * dt)) this.vel.x = 0;
-    if (this.world.moveAxis(this.c, this.h, 2, this.vel.z * dt)) this.vel.z = 0;
+    const canStep = this.grounded && this.vel.y <= 0;
+    if (this.world.moveAxis(this.c, this.h, 0, this.vel.x * dt) && !(canStep && this.stepUp(0, this.vel.x * dt))) this.vel.x = 0;
+    if (this.world.moveAxis(this.c, this.h, 2, this.vel.z * dt) && !(canStep && this.stepUp(2, this.vel.z * dt))) this.vel.z = 0;
     const fall = this.vel.y;
     const wasGrounded = this.grounded;
     this.grounded = false;
@@ -191,10 +233,18 @@ export class Player {
           const hard = Math.min(1, (-fall - 4) / 10);
           this.landDip = 0.08 + hard * 0.22;
           this.audio.land(hard);
+          const over = -fall - SAFE_FALL;
+          if (over > 0) this.fallDamage = 4 * over + 0.3 * over * over;
         }
       }
       this.vel.y = 0;
+    } else if (wasGrounded && this.vel.y <= 0) {
+      // Walking down stairs or a ramp: stay on the next tread instead of hopping off each one.
+      const y = this.c.y;
+      if (this.world.moveAxis(this.c, this.h, 1, -STEP)) { this.grounded = true; this.vel.y = 0; this.stepEase = Math.min(0.5, this.stepEase + (y - this.c.y)); }
+      else this.c.y = y;
     }
+    this.stepEase *= Math.exp(-14 * dt);
     this.pos.set(this.c.x, this.c.y - hh, this.c.z);
 
     // Bob, steps, misc
@@ -207,6 +257,7 @@ export class Player {
     }
     this.landDip *= Math.exp(-9 * dt);
     this.shake *= Math.exp(-5 * dt);
+    this.punch *= Math.exp(-13 * dt);
     this.roll += ((this.sliding ? 0.07 : -r * 0.012 * (this.grounded ? 1 : 0.3)) - this.roll) * Math.min(1, dt * 8);
     this.sinceHit += dt;
     if (this.sinceHit > 5 && this.health > 0) {
@@ -226,6 +277,6 @@ export class Player {
     cam.rotation.order = 'YXZ';
     cam.rotation.y = this.yaw + this.recoilYaw + (Math.random() - 0.5) * sh;
     cam.rotation.x = Math.max(-1.56, Math.min(1.56, this.pitch + this.recoilPitch + (Math.random() - 0.5) * sh));
-    cam.rotation.z = this.roll + (Math.random() - 0.5) * sh;
+    cam.rotation.z = this.roll + this.punch + (Math.random() - 0.5) * sh;
   }
 }

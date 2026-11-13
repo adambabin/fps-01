@@ -243,7 +243,7 @@ export class Game {
       ...shared, nav: this.nav, projectiles: this.projectiles, shotSpeed: 1, slots: 2, shared: { droneCd: 0, engaged: 0 },
       hurtPlayer: (a, from) => this.hurtPlayer(a, from),
       onKill: (e, crit) => this.onKill(e, crit),
-      shockwave: (at, dmg) => { this.shockwaves.spawn(at.x, at.z, dmg); this.audio.explosion(tmpC.set(at.x, 0, at.z), true); this.effects.explosion(tmpC, 1.5); },
+      shockwave: (at, dmg) => { this.shockwaves.spawn(at.x, at.z, dmg, this.world.collision.groundAt(this.player.pos.x, this.player.pos.z, this.player.pos.y + 0.1)); this.audio.explosion(tmpC.set(at.x, 0, at.z), true); this.effects.explosion(tmpC, 1.5); },
       summon: (type, count) => { for (let i = 0; i < count; i++) this.spawn(type); this.ui.announce('REINFORCEMENTS', '', 1.4); },
     };
     this.projCtx = {
@@ -583,11 +583,16 @@ export class Game {
 
   has(k: Keystone): boolean { return this.keystones.has(k); }
 
-  /** HUD line while waiting to travel; touch players have a NEXT ARENA button right below it. */
-  private readyPrompt(): string {
-    if (this.touch) return 'GRAB YOUR DROPS';
+  /** Key (or button) that moves on to the next arena, as shown on screen; '' on touch, which has its own button. */
+  private readyKey(): string {
+    if (this.touch) return '';
     const code = this.pad.active && this.settings.pad.ready ? this.settings.pad.ready : this.settings.binds.ready[0];
-    return `PRESS ${codeLabel(code).toUpperCase()} FOR THE NEXT ARENA`;
+    return codeLabel(code).toUpperCase();
+  }
+
+  private readyPrompt(): string {
+    const k = this.readyKey();
+    return k ? `PRESS ${k} FOR THE NEXT ARENA` : 'TAP NEXT ARENA WHEN READY';
   }
 
   private pickUpgrade(i: number) {
@@ -689,7 +694,7 @@ export class Game {
     this.ui.announce('OBJECTIVE COMPLETE', `+${bonus} · SUPPLY DROP · EXTRA UPGRADE CHOICE${life ? ' · EXTRA LIFE' : ''}`, 2.4);
     [PICKUP_HEALTH, PICKUP_AMMO, PICKUP_ARMOR].forEach((k, i) => {
       const a = p.yaw + (i - 1) * 0.7;
-      this.pickups.spawn(k, tmpA.set(p.pos.x - Math.sin(a) * 2.2, 0.5, p.pos.z - Math.cos(a) * 2.2));
+      this.drop(k, p.pos.x - Math.sin(a) * 2.2, p.pos.y, p.pos.z - Math.cos(a) * 2.2);
     });
   }
 
@@ -738,7 +743,7 @@ export class Game {
     if (src === 'melee') {
       // Melee kills always shake something loose.
       if (this.meleeArmor) this.player.armor = Math.min(this.player.maxArmor, this.player.armor + this.meleeArmor);
-      this.pickups.spawn(this.player.health < this.player.maxHealth * 0.6 ? PICKUP_HEALTH : PICKUP_AMMO, tmpA.set(e.pos.x, 0.5, e.pos.z));
+      this.drop(this.player.health < this.player.maxHealth * 0.6 ? PICKUP_HEALTH : PICKUP_AMMO, e.pos.x, e.pos.y, e.pos.z);
     }
     if (this.lifesteal) this.player.health = Math.min(this.player.maxHealth, this.player.health + this.lifesteal);
     if (this.has('spree')) { this.spree = Math.min(5, this.spree + 1); this.spreeT = 3; }
@@ -746,7 +751,6 @@ export class Game {
     // kills, so this cannot chain.
     if (crit && src === 'bullet' && this.has('overload')) this.explode(e.center(new THREE.Vector3()), 4.5, 85 * this.weapons.mods.damage, 0);
     const p = e.center(tmpC).clone();
-    p.y = 0.5;
     if (e.type === 'boss') { this.boss = null; const life = this.addLife(); this.ui.announce(`${e.label.toUpperCase()} DESTROYED`, `+${pts}${life ? ' · EXTRA LIFE' : ''}`, 2.5); }
     const drops = e.type === 'boss' ? 7 : e.type === 'heavy' ? 3 : 1;
     for (let i = 0; i < drops; i++) {
@@ -758,8 +762,13 @@ export class Game {
       else if (r < hp + 0.23 * k) kind = PICKUP_ARMOR;
       else if (r < hp + 0.27 * k) kind = PICKUP_GRENADE;
       else if (e.type === 'heavy' || e.type === 'boss') kind = i % 3 === 0 ? PICKUP_HEALTH : i % 3 === 1 ? PICKUP_AMMO : PICKUP_ARMOR;
-      if (kind >= 0) this.pickups.spawn(kind, tmpA.set(p.x + (Math.random() - 0.5) * drops, 0.5, p.z + (Math.random() - 0.5) * drops));
+      if (kind >= 0) this.drop(kind, p.x + (Math.random() - 0.5) * drops, e.pos.y, p.z + (Math.random() - 0.5) * drops);
     }
+  }
+
+  /** Puts a pickup on whatever surface lies under (x, z) at or just above height y. */
+  private drop(kind: number, x: number, y: number, z: number) {
+    this.pickups.spawn(kind, tmpA.set(x, this.world.collision.groundAt(x, z, y + 0.6) + 0.5, z));
   }
 
   /** Whether a drop of this kind would do anything; full stats leave it on the ground. */
@@ -878,6 +887,12 @@ export class Game {
     if (input.wasPressed('pause')) { this.pause(); return; }
 
     p.update(dt, input, this.settings, w.ads, w.wantsFire, w.def.zoom);
+    if (p.fallDamage > 0) {
+      // A hard landing is ordinary damage: armor, the barrier, Last stand and lives all apply.
+      const d = p.fallDamage; p.fallDamage = 0;
+      this.ui.feed(`Hard landing <b>-${Math.round(d)}</b>`);
+      this.hurtPlayer(d, p.pos);
+    }
     if (p.slideStarted && this.has('combatslide')) {
       w.instantReload(this.audio);
       p.invuln = Math.max(p.invuln, 0.6);
@@ -903,12 +918,12 @@ export class Game {
 
     // Pathfinding refresh
     this.navT -= dt;
-    if (this.navT <= 0) { this.navT = 0.2; this.nav.compute(p.pos.x, p.pos.z); }
+    if (this.navT <= 0) { this.navT = 0.2; this.nav.compute(p.pos.x, p.pos.y, p.pos.z); }
 
     this.enemies.update(dt, this.enemyCtx);
     this.projectiles.update(dt, this.projCtx);
     this.pickups.update(dt, p, (k) => this.wantsPickup(k), (k) => this.collect(k), this.pickupReach);
-    this.shockwaves.update(dt, p, (a, from) => this.hurtPlayer(a, from));
+    this.shockwaves.update(dt, p, this.world.collision.groundAt(p.pos.x, p.pos.z, p.pos.y + 0.1), (a, from) => this.hurtPlayer(a, from));
     const res = this.objectives.update(dt, p);
     if (res === 'done') this.objectiveDone();
     else if (res === 'failed') { this.audio.objective(false); this.ui.feed('Objective missed'); }
@@ -950,7 +965,7 @@ export class Game {
       health: p.health, maxHealth: p.maxHealth, armor: p.armor, maxArmor: p.maxArmor, wave: Math.max(1, this.wave),
       remaining: this.enemies.list.length + this.queue.length, score: this.score, weapons: w, spreadPx, ads: w.ads,
       sprinting: p.sprinting, fps: this.fps, intermission: this.intermission,
-      prompt: this.awaitReady ? this.readyPrompt() : '',
+      prompt: this.awaitReady ? 'ARENA CLEAR' : '', ready: this.awaitReady ? this.readyKey() : null,
       best: this.best, perks: this.perkStatus(), lives: this.lives, maxLives: MAX_LIVES,
       boss: this.boss && this.boss.alive ? this.boss.hp / this.boss.maxHp : -1, bossName: this.boss ? this.boss.label : '',
     });

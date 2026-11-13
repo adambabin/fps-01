@@ -62,7 +62,7 @@ There is no lint config and no test suite. Verification is done by driving the b
 
 **Balance data** lives in tables: `WEAPONS` (`weapons.ts`), `ENEMY_DEFS` (`enemies.ts`), `UPGRADES` and the wave budget in `nextWave()` (`game.ts`). Upgrades mutate `weapons.mods` or player stats.
 
-**UI** is plain DOM declared in `index.html` and styled in `src/style.css`; `ui.ts` only toggles and fills it. Settings and key bindings (two slots per action, including `MouseN` codes) persist to `localStorage` via `settings.ts`.
+**UI** is plain DOM declared in `index.html` and styled in `src/style.css`; `ui.ts` only toggles and fills it. Settings and key bindings (two slots per action, including `MouseN` codes) persist to `localStorage` via `settings.ts`. To change a stored value for existing players once (not just the default), bump `SETTINGS_REV` and migrate in `loadSettings()`; rev 1 turned scroll switching on and aim to hold.
 
 ## Headless testing
 

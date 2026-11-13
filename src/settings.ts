@@ -47,6 +47,23 @@ export interface Settings {
   showFps: boolean;
   damageNumbers: boolean;
   binds: Record<Action, string[]>;
+  /** One controller button per action, as a `PadN` code ('' = unbound). */
+  pad: Record<Action, string>;
+  /** Right-stick turn rate; independent of the mouse sensitivity. */
+  padSensitivity: number;
+  padVibration: boolean;
+}
+
+/** Controller buttons in the standard layout, with Xbox names. The index is the `PadN` code. */
+export const PAD_BUTTONS = ['A', 'B', 'X', 'Y', 'LB', 'RB', 'LT', 'RT', 'View', 'Menu', 'L-Stick Click', 'R-Stick Click', 'D-Pad Up', 'D-Pad Down', 'D-Pad Left', 'D-Pad Right', 'Guide'];
+
+export function defaultPad(): Record<Action, string> {
+  return {
+    forward: '', back: '', left: '', right: '',
+    jump: 'Pad0', crouch: 'Pad1', reload: 'Pad2', nextWeapon: 'Pad3', grenade: 'Pad4', melee: 'Pad5', ads: 'Pad6', fire: 'Pad7',
+    pause: 'Pad9', sprint: 'Pad10',
+    weapon1: 'Pad12', weapon2: 'Pad15', weapon3: 'Pad13', weapon4: 'Pad14', weapon5: '', weapon6: '',
+  };
 }
 
 export function defaultBinds(): Record<Action, string[]> {
@@ -66,7 +83,7 @@ export function defaults(): Settings {
   return {
     sensitivity: 1.0, adsSensitivity: 1.0, invertY: false, fov: 75, quality: touch ? 'low' : 'medium', difficulty: 'normal', arena: 'reactor', rotate: true,
     volume: 0.7, adsToggle: false, scrollSwitch: true, rawInput: true, showFps: false,
-    damageNumbers: true, binds: defaultBinds(),
+    damageNumbers: true, binds: defaultBinds(), pad: defaultPad(), padSensitivity: 1, padVibration: true,
   };
 }
 
@@ -90,9 +107,9 @@ export function loadSettings(): Settings {
     const raw = localStorage.getItem(KEY);
     if (raw) {
       const p = JSON.parse(raw);
-      const binds = { ...s.binds, ...(p.binds || {}) };
+      const binds = { ...s.binds, ...(p.binds || {}) }, pad = { ...s.pad, ...(p.pad || {}) };
       Object.assign(s, p);
-      s.binds = binds;
+      s.binds = binds; s.pad = pad;
     }
   } catch { /* storage unavailable */ }
   return s;
@@ -137,6 +154,7 @@ export function codeLabel(code: string | undefined): string {
   if (code === 'Mouse1') return 'Middle Click';
   if (code === 'Mouse2') return 'Right Click';
   if (code.startsWith('Mouse')) return 'Mouse ' + code.slice(5);
+  if (code.startsWith('Pad')) return PAD_BUTTONS[Number(code.slice(3))] ?? 'Button ' + code.slice(3);
   if (code.startsWith('Key')) return code.slice(3);
   if (code.startsWith('Digit')) return code.slice(5);
   if (code.startsWith('Arrow')) return code.slice(5) + ' Arrow';

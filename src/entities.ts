@@ -173,7 +173,7 @@ export class Shockwaves {
 }
 
 export const PICKUP_HEALTH = 0, PICKUP_ARMOR = 1, PICKUP_AMMO = 2, PICKUP_GRENADE = 3;
-interface Pickup { kind: number; group: THREE.Group; life: number; active: boolean; baseY: number; }
+interface Pickup { kind: number; group: THREE.Group; born: number; active: boolean; baseY: number; }
 
 export class Pickups {
   private list: Pickup[] = [];
@@ -249,15 +249,21 @@ export class Pickups {
         const g = builders[kind]();
         g.visible = false;
         scene.add(g);
-        this.list.push({ kind, group: g, life: 0, active: false, baseY: 0.5 });
+        this.list.push({ kind, group: g, born: 0, active: false, baseY: 0.5 });
       }
     }
   }
 
   spawn(kind: number, pos: THREE.Vector3) {
-    const p = this.list.find((q) => q.kind === kind && !q.active);
+    // Drops stay until collected, so when all of a kind are on the ground the oldest is moved.
+    let p: Pickup | undefined;
+    for (const q of this.list) {
+      if (q.kind !== kind) continue;
+      if (!q.active) { p = q; break; }
+      if (!p || q.born < p.born) p = q;
+    }
     if (!p) return;
-    p.active = true; p.life = 25;
+    p.active = true; p.born = this.t;
     p.baseY = Math.max(0.5, Math.min(pos.y, 1.2));
     p.group.position.set(pos.x, p.baseY, pos.z);
     p.group.visible = true;
@@ -265,20 +271,26 @@ export class Pickups {
 
   clear() { for (const p of this.list) { p.active = false; p.group.visible = false; } }
 
-  /** `collect` returns false when the player has no use for the pickup. */
-  update(dt: number, player: Player, collect: (kind: number) => boolean, reach = 3.2) {
+  /**
+   * `wants` says whether the player has any use for a kind right now. A drop they cannot use
+   * is neither pulled in nor taken; it waits where it fell until they can.
+   */
+  update(dt: number, player: Player, wants: (kind: number) => boolean, collect: (kind: number) => void, reach = 3.2) {
     this.t += dt;
+    const want = [wants(0), wants(1), wants(2), wants(3)];
     for (const p of this.list) {
       if (!p.active) continue;
-      p.life -= dt;
       const g = p.group;
       g.rotation.y += dt * 1.8;
-      g.position.y = p.baseY + Math.sin(this.t * 3 + g.position.x) * 0.08;
-      g.visible = p.life > 4 || Math.floor(p.life * 6) % 2 === 0;
+      g.position.y = p.baseY + Math.sin(this.t * 3 + p.born * 7) * 0.08;
+      if (!want[p.kind]) continue;
       const dx = player.pos.x - g.position.x, dz = player.pos.z - g.position.z, d = Math.hypot(dx, dz);
       if (d < reach && d > 0.01) { const v = 7 * Math.max(1, reach / 3.2); g.position.x += (dx / d) * dt * v; g.position.z += (dz / d) * dt * v; }
-      if (d < 1.1 && Math.abs(player.pos.y + 0.9 - g.position.y) < 1.8 && collect(p.kind)) p.life = 0;
-      if (p.life <= 0) { p.active = false; g.visible = false; }
+      if (d < 1.1 && Math.abs(player.pos.y + 0.9 - g.position.y) < 1.8) {
+        collect(p.kind);
+        want[p.kind] = wants(p.kind);
+        p.active = false; g.visible = false;
+      }
     }
   }
 }

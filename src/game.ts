@@ -4,6 +4,8 @@ import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
 import { Pass } from 'three/examples/jsm/postprocessing/Pass.js';
 import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
+import { GTAOPass } from 'three/examples/jsm/postprocessing/GTAOPass.js';
+import { ShaderPass } from 'three/examples/jsm/postprocessing/ShaderPass.js';
 import { AudioSys } from './audio';
 import { Effects } from './effects';
 import { BOSSES } from './bosses';
@@ -35,6 +37,42 @@ class ViewmodelPass extends Pass {
     renderer.autoClear = auto;
   }
 }
+
+/** Ambient occlusion over the world only. Blended surfaces (light volumes, tracers, decals) are hidden while it reads depth, or they would cast occlusion. */
+class WorldAOPass extends GTAOPass {
+  private hidden: THREE.Object3D[] = [];
+  render(renderer: THREE.WebGLRenderer, write: THREE.WebGLRenderTarget, read: THREE.WebGLRenderTarget, dt: number, mask: boolean) {
+    const hidden = this.hidden;
+    this.scene.traverseVisible((o) => {
+      const mat = (o as THREE.Mesh).material as THREE.Material | undefined;
+      if (mat && mat.transparent && !mat.depthWrite) hidden.push(o);
+    });
+    for (const o of hidden) o.visible = false;
+    super.render(renderer, write, read, dt, mask);
+    for (const o of hidden) o.visible = true;
+    hidden.length = 0;
+  }
+}
+
+/** Per-arena colour grade in linear HDR, before tone mapping: split-tone, saturation, contrast and a vignette. */
+const GradeShader = {
+  uniforms: {
+    tDiffuse: { value: null as THREE.Texture | null },
+    shadows: { value: new THREE.Vector3(1, 1, 1) }, highlights: { value: new THREE.Vector3(1, 1, 1) },
+    saturation: { value: 1 }, contrast: { value: 1 }, vignette: { value: 0 },
+  },
+  vertexShader: 'varying vec2 vUv; void main() { vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }',
+  fragmentShader: `uniform sampler2D tDiffuse; uniform vec3 shadows; uniform vec3 highlights; uniform float saturation; uniform float contrast; uniform float vignette; varying vec2 vUv;
+    void main() {
+      vec4 c = texture2D(tDiffuse, vUv);
+      vec3 col = max(c.rgb, 0.0);
+      float l = dot(col, vec3(0.2126, 0.7152, 0.0722));
+      col = max(mix(vec3(l), col, saturation), 0.0) * mix(shadows, highlights, smoothstep(0.0, 0.5, l));
+      col = 0.18 * pow(col / 0.18, vec3(contrast));
+      col *= 1.0 - vignette * smoothstep(0.3, 0.95, length((vUv - 0.5) * vec2(1.25, 1.0)) * 1.5);
+      gl_FragColor = vec4(col, c.a);
+    }`,
+};
 
 export type Track = 'firepower' | 'survival' | 'utility';
 export const TRACKS: Track[] = ['firepower', 'survival', 'utility'];
@@ -132,6 +170,7 @@ export class Game {
   private best = 0;
   private composer!: EffectComposer;
   private bloom!: UnrealBloomPass;
+  private grade!: ShaderPass;
   private queue: EnemyType[] = [];
   private spawnT = 0;
   private intermission = 0;
@@ -177,7 +216,7 @@ export class Game {
     this.nav = new FlowField(this.world.collision);
     this.effects = new Effects(this.scene);
     this.player = new Player(this.world.collision, this.audio);
-    this.weapons = new WeaponSystem(this.scene, this.scene.environment);
+    this.weapons = new WeaponSystem(this.scene, this.world.studioEnv);
     this.enemies = new EnemyManager(this.scene);
     this.projectiles = new Projectiles(this.scene);
     this.pickups = new Pickups(this.scene);
@@ -298,10 +337,17 @@ export class Game {
     const rt = new THREE.WebGLRenderTarget(size.x, size.y, { type: THREE.HalfFloatType, samples: q === 'low' ? 0 : 4 });
     this.composer = new EffectComposer(this.renderer, rt);
     this.composer.addPass(new RenderPass(this.scene, this.camera));
+    if (q !== 'low') {
+      const ao = new WorldAOPass(this.scene, this.camera, size.x, size.y);
+      ao.updateGtaoMaterial({ radius: 0.9, distanceExponent: 1.4, thickness: 1.6, scale: 1.25, samples: q === 'high' ? 16 : 8 });
+      this.composer.addPass(ao);
+    }
     this.composer.addPass(new ViewmodelPass(this.weapons.scene, this.weapons.camera));
     this.bloom = new UnrealBloomPass(new THREE.Vector2(size.x / 2, size.y / 2), q === 'high' ? 0.5 : 0.42, 0.55, 1.0);
     this.bloom.enabled = q !== 'low';
     this.composer.addPass(this.bloom);
+    this.grade = new ShaderPass(GradeShader);
+    this.composer.addPass(this.grade);
     this.composer.addPass(new OutputPass());
 
     const sun = this.world.sun;
@@ -789,6 +835,9 @@ export class Game {
       this.camera.rotation.z = Math.min(0.5, this.deadT * 0.5);
     }
 
+    const gr = this.world.grade, gu = this.grade.uniforms;
+    gu.shadows.value.set(...gr.shadows); gu.highlights.value.set(...gr.highlights);
+    gu.saturation.value = gr.saturation; gu.contrast.value = gr.contrast; gu.vignette.value = gr.vignette;
     this.composer.render();
     this.input.endFrame();
   }

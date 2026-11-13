@@ -1,6 +1,5 @@
 import * as THREE from 'three';
 import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
-import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
 import { Pass } from 'three/examples/jsm/postprocessing/Pass.js';
 import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
@@ -38,24 +37,34 @@ class ViewmodelPass extends Pass {
   }
 }
 
-/** Ambient occlusion over the world only. Blended surfaces (light volumes, tracers, decals) are hidden while it reads depth, or they would cast occlusion. */
+/**
+ * Ambient occlusion over the world only, kept cheap: it reads the depth the world pass already produced (no second
+ * geometry pass) and works at half resolution. Blended surfaces do not write depth, so they never cast occlusion.
+ */
 class WorldAOPass extends GTAOPass {
-  private hidden: THREE.Object3D[] = [];
+  private mats: THREE.ShaderMaterial[];
+  constructor(scene: THREE.Scene, camera: THREE.Camera, w: number, h: number) {
+    super(scene, camera, Math.ceil(w / 2), Math.ceil(h / 2));
+    // GTAOPass cannot be constructed around an outside depth texture, so switch it over by hand:
+    // skip its own geometry pass and rebuild normals from depth.
+    const self = this as unknown as { gtaoMaterial: THREE.ShaderMaterial; pdMaterial: THREE.ShaderMaterial; _renderGBuffer: boolean };
+    self._renderGBuffer = false;
+    this.mats = [self.gtaoMaterial, self.pdMaterial];
+    for (const m of this.mats) { m.defines.NORMAL_VECTOR_TYPE = 0; m.defines.DEPTH_SWIZZLING = 'x'; m.uniforms.tNormal.value = null; m.needsUpdate = true; }
+  }
+  setSize(w: number, h: number) { super.setSize(Math.ceil(w / 2), Math.ceil(h / 2)); }
   render(renderer: THREE.WebGLRenderer, write: THREE.WebGLRenderTarget, read: THREE.WebGLRenderTarget, dt: number, mask: boolean) {
-    const hidden = this.hidden;
-    this.scene.traverseVisible((o) => {
-      const mat = (o as THREE.Mesh).material as THREE.Material | undefined;
-      if (mat && mat.transparent && !mat.depthWrite) hidden.push(o);
-    });
-    for (const o of hidden) o.visible = false;
+    // The composer's two buffers trade places every frame, so the world's depth is in whichever one was just drawn.
+    for (const m of this.mats) m.uniforms.tDepth.value = read.depthTexture;
     super.render(renderer, write, read, dt, mask);
-    for (const o of hidden) o.visible = true;
-    hidden.length = 0;
   }
 }
 
-/** Per-arena colour grade in linear HDR, before tone mapping: split-tone, saturation, contrast and a vignette. */
-const GradeShader = {
+/**
+ * Final pass: the arena's colour grade (split-tone, saturation, contrast, vignette) in linear HDR, then tone mapping
+ * and output encoding, which the renderer applies to this material because it draws to the screen.
+ */
+const FinalShader = {
   uniforms: {
     tDiffuse: { value: null as THREE.Texture | null },
     shadows: { value: new THREE.Vector3(1, 1, 1) }, highlights: { value: new THREE.Vector3(1, 1, 1) },
@@ -64,13 +73,14 @@ const GradeShader = {
   vertexShader: 'varying vec2 vUv; void main() { vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }',
   fragmentShader: `uniform sampler2D tDiffuse; uniform vec3 shadows; uniform vec3 highlights; uniform float saturation; uniform float contrast; uniform float vignette; varying vec2 vUv;
     void main() {
-      vec4 c = texture2D(tDiffuse, vUv);
-      vec3 col = max(c.rgb, 0.0);
+      vec3 col = max(texture2D(tDiffuse, vUv).rgb, 0.0);
       float l = dot(col, vec3(0.2126, 0.7152, 0.0722));
       col = max(mix(vec3(l), col, saturation), 0.0) * mix(shadows, highlights, smoothstep(0.0, 0.5, l));
       col = 0.18 * pow(col / 0.18, vec3(contrast));
       col *= 1.0 - vignette * smoothstep(0.3, 0.95, length((vUv - 0.5) * vec2(1.25, 1.0)) * 1.5);
-      gl_FragColor = vec4(col, c.a);
+      gl_FragColor = vec4(col, 1.0);
+      #include <tonemapping_fragment>
+      #include <colorspace_fragment>
     }`,
 };
 
@@ -341,21 +351,24 @@ export class Game {
     this.renderer.setSize(window.innerWidth, window.innerHeight, false);
     this.composer?.dispose();
     const size = this.renderer.getDrawingBufferSize(new THREE.Vector2());
-    const rt = new THREE.WebGLRenderTarget(size.x, size.y, { type: THREE.HalfFloatType, samples: q === 'low' ? 0 : 4 });
+    const rt = new THREE.WebGLRenderTarget(size.x, size.y, {
+      type: THREE.HalfFloatType, samples: q === 'low' ? 0 : 4,
+      depthTexture: q === 'low' ? null : new THREE.DepthTexture(size.x, size.y),
+    });
     this.composer = new EffectComposer(this.renderer, rt);
     this.composer.addPass(new RenderPass(this.scene, this.camera));
     if (q !== 'low') {
       const ao = new WorldAOPass(this.scene, this.camera, size.x, size.y);
-      ao.updateGtaoMaterial({ radius: 0.9, distanceExponent: 1.4, thickness: 1.6, scale: 1.25, samples: q === 'high' ? 16 : 8 });
+      ao.updateGtaoMaterial({ radius: 0.9, distanceExponent: 1.4, thickness: 1.6, scale: 1.25, samples: q === 'high' ? 12 : 8 });
+      ao.updatePdMaterial({ samples: q === 'high' ? 12 : 8 });
       this.composer.addPass(ao);
     }
     this.composer.addPass(new ViewmodelPass(this.weapons.scene, this.weapons.camera));
     this.bloom = new UnrealBloomPass(new THREE.Vector2(size.x / 2, size.y / 2), q === 'high' ? 0.5 : 0.42, 0.55, 1.0);
     this.bloom.enabled = q !== 'low';
     this.composer.addPass(this.bloom);
-    this.grade = new ShaderPass(GradeShader);
+    this.grade = new ShaderPass(FinalShader);
     this.composer.addPass(this.grade);
-    this.composer.addPass(new OutputPass());
 
     const sun = this.world.sun;
     sun.castShadow = q !== 'low';

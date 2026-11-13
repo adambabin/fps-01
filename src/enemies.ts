@@ -5,7 +5,7 @@ import type { Projectiles } from './entities';
 import type { FlowField } from './nav';
 import { raySphere, type CollisionWorld } from './physics';
 import type { Player } from './player';
-import { makeSurface } from './textures';
+import { createRobot } from './robotModels';
 import { ARENA, CEIL } from './world';
 
 export type EnemyType = 'scuttler' | 'trooper' | 'drone' | 'heavy';
@@ -35,38 +35,10 @@ export interface EnemyCtx {
   onKill(e: Enemy, crit: boolean): void;
 }
 
-// ---------- shared geometry and materials ----------
-const BOX = new THREE.BoxGeometry(1, 1, 1);
-const CYL = new THREE.CylinderGeometry(0.5, 0.5, 1, 12);
-const ICO = new THREE.IcosahedronGeometry(1, 1);
-const DISC = new THREE.CylinderGeometry(0.5, 0.5, 1, 18);
-
-const jointMat = new THREE.MeshStandardMaterial({ color: 0x15171a, metalness: 0.6, roughness: 0.6 });
-const rotorMat = new THREE.MeshStandardMaterial({ color: 0x0c0d0f, metalness: 0.3, roughness: 0.5, transparent: true, opacity: 0.45 });
-const BODY_COLORS: Record<EnemyType, number> = { scuttler: 0x4a4138, trooper: 0x3f464e, drone: 0x33383f, heavy: 0x4d3a30 };
-const plate = makeSurface({ seed: 63, color: [255, 255, 255], panels: 0, roughness: 0.5, wear: 1.6, bump: 2.5 }, 256);
-const paintMat = new THREE.MeshStandardMaterial({ map: plate.map, roughnessMap: plate.roughnessMap, normalMap: plate.normalMap, color: 0x8c3a1c, metalness: 0.35, roughness: 1 });
-const hazardMat = new THREE.MeshStandardMaterial({ map: plate.map, roughnessMap: plate.roughnessMap, normalMap: plate.normalMap, color: 0x94761f, metalness: 0.35, roughness: 1 });
-
-function part(parent: THREE.Object3D, geo: THREE.BufferGeometry, mat: THREE.Material, sx: number, sy: number, sz: number, x: number, y: number, z: number): THREE.Mesh {
-  const m = new THREE.Mesh(geo, mat);
-  m.scale.set(sx, sy, sz);
-  m.position.set(x, y, z);
-  m.castShadow = true;
-  parent.add(m);
-  return m;
-}
-function pivot(parent: THREE.Object3D, x: number, y: number, z: number): THREE.Group {
-  const g = new THREE.Group();
-  g.position.set(x, y, z);
-  parent.add(g);
-  return g;
-}
-
 const v1 = new THREE.Vector3(), v2 = new THREE.Vector3(), v3 = new THREE.Vector3();
 
 export class Enemy {
-  group = new THREE.Group();
+  group: THREE.Group;
   pos = new THREE.Vector3();
   vel = new THREE.Vector3();
   yaw = 0;
@@ -75,11 +47,15 @@ export class Enemy {
   alive = true;
   def: Def;
   flash = 0;
-  private body: THREE.MeshStandardMaterial;
+  private hull: THREE.MeshStandardMaterial;
   private eye: THREE.MeshBasicMaterial;
+  private body: THREE.Object3D;
+  private chest: THREE.Object3D | null = null;
+  private head: THREE.Object3D | null = null;
   private legs: THREE.Object3D[] = [];
+  private shins: THREE.Object3D[] = [];
   private spin: THREE.Object3D[] = [];
-  private torso: THREE.Object3D | null = null;
+  private smokeT = 0;
   private walk = Math.random() * 6;
   private los = false;
   private losT = Math.random() * 0.25;
@@ -97,97 +73,23 @@ export class Enemy {
     this.def = ENEMY_DEFS[type];
     this.hp = this.maxHp = this.def.hp * hpMult;
     this.pos.copy(pos);
-    this.body = new THREE.MeshStandardMaterial({ map: plate.map, roughnessMap: plate.roughnessMap, normalMap: plate.normalMap, color: BODY_COLORS[type], metalness: 0.75, roughness: 1 });
-    this.eye = new THREE.MeshBasicMaterial();
+    const model = createRobot(type);
+    this.group = model.root;
+    this.hull = model.hull;
+    this.eye = model.eye;
     this.eye.color.setRGB(4, 0.7, 0.2);
-    this.build();
-    this.group.position.copy(pos);
-  }
-
-  private build() {
-    const g = this.group, b = this.body, j = jointMat, e = this.eye;
-    if (this.type === 'trooper') {
-      for (const s of [1, -1]) {
-        const leg = pivot(g, 0.15 * s, 0.96, 0);
-        part(leg, BOX, b, 0.17, 0.48, 0.21, 0, -0.24, 0.02);
-        part(leg, BOX, j, 0.11, 0.1, 0.13, 0, -0.5, 0);
-        part(leg, BOX, b, 0.14, 0.42, 0.17, 0, -0.72, -0.02);
-        part(leg, BOX, j, 0.17, 0.08, 0.32, 0, -0.92, 0.06);
-        this.legs.push(leg);
-      }
-      const t = pivot(g, 0, 0, 0); this.torso = t;
-      part(t, BOX, j, 0.4, 0.18, 0.25, 0, 1.0, 0);
-      part(t, BOX, j, 0.26, 0.16, 0.2, 0, 1.13, 0);
-      part(t, BOX, b, 0.58, 0.44, 0.34, 0, 1.4, 0);
-      part(t, BOX, b, 0.46, 0.26, 0.1, 0, 1.44, 0.2);
-      part(t, BOX, j, 0.36, 0.4, 0.16, 0, 1.4, -0.24);
-      for (const s of [1, -1]) part(t, BOX, paintMat, 0.2, 0.2, 0.28, 0.39 * s, 1.56, 0);
-      part(t, BOX, j, 0.11, 0.46, 0.13, -0.4, 1.24, 0.02);
-      part(t, BOX, j, 0.12, 0.13, 0.5, 0.4, 1.34, 0.22);
-      part(t, BOX, b, 0.15, 0.17, 0.3, 0.4, 1.34, 0.42);
-      const barrel = part(t, CYL, j, 0.06, 0.26, 0.06, 0.4, 1.34, 0.68); barrel.rotation.x = Math.PI / 2;
-      part(t, BOX, j, 0.12, 0.08, 0.12, 0, 1.64, 0);
-      part(t, BOX, b, 0.25, 0.22, 0.27, 0, 1.78, 0);
-      part(t, BOX, e, 0.2, 0.05, 0.02, 0, 1.79, 0.14).castShadow = false;
-      part(t, BOX, j, 0.03, 0.2, 0.03, 0.1, 1.98, -0.08);
-    } else if (this.type === 'scuttler') {
-      const t = pivot(g, 0, 0, 0); this.torso = t;
-      part(t, BOX, b, 0.7, 0.26, 1.0, 0, 0.5, 0);
-      part(t, BOX, paintMat, 0.52, 0.12, 0.7, 0, 0.67, -0.05);
-      part(t, BOX, j, 0.5, 0.16, 0.2, 0, 0.44, 0.55);
-      part(t, BOX, e, 0.36, 0.06, 0.03, 0, 0.53, 0.66).castShadow = false;
-      for (const s of [1, -1]) {
-        const blade = part(t, BOX, j, 0.05, 0.07, 0.42, 0.2 * s, 0.38, 0.8);
-        blade.rotation.y = -0.25 * s;
-      }
-      for (const s of [1, -1]) for (const z of [0.36, 0, -0.36]) {
-        const leg = pivot(g, 0.34 * s, 0.52, z);
-        const up = part(leg, BOX, j, 0.42, 0.08, 0.1, 0.18 * s, 0.1, 0); up.rotation.z = 0.5 * s;
-        const lo = part(leg, BOX, b, 0.08, 0.62, 0.09, 0.4 * s, -0.2, 0); lo.rotation.z = 0.14 * s;
-        this.legs.push(leg);
-      }
-    } else if (this.type === 'drone') {
-      const t = pivot(g, 0, 0, 0); this.torso = t;
-      const core = part(t, ICO, b, 0.27, 0.2, 0.3, 0, 0, 0);
-      (core.material as THREE.MeshStandardMaterial).flatShading = true;
-      part(t, BOX, e, 0.14, 0.07, 0.03, 0, 0.02, 0.28).castShadow = false;
-      const gun = part(t, CYL, j, 0.05, 0.3, 0.05, 0, -0.17, 0.14); gun.rotation.x = Math.PI / 2;
-      part(t, BOX, j, 0.1, 0.1, 0.16, 0, -0.16, 0);
-      for (const sx of [1, -1]) for (const sz of [1, -1]) {
-        const arm = part(t, BOX, j, 0.05, 0.04, 0.46, 0.22 * sx, 0.04, 0.22 * sz);
-        arm.rotation.y = (Math.PI / 4) * sx * sz;
-        part(t, CYL, j, 0.07, 0.09, 0.07, 0.38 * sx, 0.07, 0.38 * sz);
-        const rotor = part(t, DISC, rotorMat, 0.44, 0.012, 0.44, 0.38 * sx, 0.13, 0.38 * sz);
-        rotor.castShadow = false;
-        this.spin.push(rotor);
-      }
+    this.body = model.node('body');
+    if (type === 'trooper' || type === 'heavy') {
+      this.legs = [model.node('legR'), model.node('legL')];
+      this.shins = [model.node('shinR'), model.node('shinL')];
+      this.head = model.node('head');
+      this.chest = type === 'trooper' ? model.node('chest') : null;
+    } else if (type === 'scuttler') {
+      for (const s of ['R', 'L']) for (let i = 0; i < 3; i++) this.legs.push(model.node(`leg${s}${i}`));
     } else {
-      for (const s of [1, -1]) {
-        const leg = pivot(g, 0.44 * s, 1.5, 0);
-        part(leg, BOX, b, 0.42, 0.72, 0.5, 0, -0.34, 0.04);
-        part(leg, BOX, j, 0.3, 0.2, 0.34, 0, -0.76, 0);
-        part(leg, BOX, b, 0.36, 0.6, 0.44, 0, -1.08, -0.04);
-        part(leg, BOX, j, 0.5, 0.16, 0.82, 0, -1.42, 0.1);
-        this.legs.push(leg);
-      }
-      const t = pivot(g, 0, 0, 0); this.torso = t;
-      part(t, BOX, j, 1.05, 0.36, 0.66, 0, 1.62, 0);
-      part(t, BOX, b, 1.5, 1.05, 1.0, 0, 2.34, 0);
-      part(t, BOX, b, 1.2, 0.5, 0.2, 0, 2.5, 0.56);
-      part(t, BOX, j, 1.1, 0.8, 0.3, 0, 2.3, -0.6);
-      const core = part(t, CYL, e, 0.34, 0.06, 0.34, 0, 2.06, 0.52); core.rotation.x = Math.PI / 2; core.castShadow = false;
-      part(t, BOX, j, 0.3, 0.14, 0.3, 0, 2.9, 0.05);
-      part(t, BOX, b, 0.36, 0.24, 0.36, 0, 3.04, 0.05);
-      part(t, BOX, e, 0.26, 0.05, 0.02, 0, 3.05, 0.24).castShadow = false;
-      for (const s of [1, -1]) {
-        part(t, BOX, hazardMat, 0.62, 0.6, 0.84, 1.02 * s, 2.72, 0);
-        for (const [ox, oy] of [[-0.14, 0.13], [0.14, 0.13], [-0.14, -0.13], [0.14, -0.13]])
-          part(t, CYL, j, 0.17, 0.05, 0.17, 1.02 * s + ox, 2.72 + oy, 0.43).rotation.x = Math.PI / 2;
-        part(t, BOX, j, 0.26, 0.3, 0.3, 0.98 * s, 2.28, 0);
-        part(t, BOX, b, 0.36, 0.95, 0.42, 0.98 * s, 1.72, 0.06);
-        part(t, BOX, j, 0.3, 0.3, 0.5, 0.98 * s, 1.16, 0.14);
-      }
+      for (const n of ['rotorRF', 'rotorRB', 'rotorLF', 'rotorLB']) this.spin.push(model.node(n));
     }
+    this.group.position.copy(pos);
   }
 
   /** World-space ray test. Returns distance and whether it was a weak-point hit. */
@@ -260,7 +162,7 @@ export class Enemy {
       if (this.burst > 0) {
         speed *= 0.25; wx = -tz * this.strafe; wz = tx * this.strafe;
         this.burstT -= dt;
-        if (this.burstT <= 0) { this.burstT = 0.16; this.burst--; this.fire(c, 0.4, 1.34, 0.85, 28, 8, 'bolt', 0.035, 0.5); if (!this.burst) this.attackCd = 1.7 + Math.random() * 1.3; }
+        if (this.burstT <= 0) { this.burstT = 0.16; this.burst--; this.fire(c, 0.38, 1.34, 0.82, 28, 8, 'bolt', 0.035, 0.5); if (!this.burst) this.attackCd = 1.7 + Math.random() * 1.3; }
       } else if (this.windup > 0) {
         this.windup -= dt; speed *= 0.2; wx = -tz * this.strafe; wz = tx * this.strafe;
         if (this.windup <= 0) { this.burst = 3; this.burstT = 0; }
@@ -329,31 +231,50 @@ export class Enemy {
     this.yaw += dyaw * Math.min(1, dt * (this.type === 'heavy' ? 2.5 : 8));
 
     // Animate
-    this.walk += hs * dt * (this.type === 'heavy' ? 1.6 : this.type === 'scuttler' ? 3.2 : 2.6);
+    const heavy = this.type === 'heavy';
+    this.walk += hs * dt * (heavy ? 1.6 : this.type === 'scuttler' ? 3.2 : 2.6);
     const g = this.group;
     g.position.copy(this.pos);
     g.rotation.y = this.yaw;
-    if (this.type === 'trooper' || this.type === 'heavy') {
-      const a = Math.min(1, hs / 1.5) * (this.type === 'heavy' ? 0.4 : 0.6);
-      this.legs[0].rotation.x = Math.sin(this.walk) * a;
-      this.legs[1].rotation.x = -Math.sin(this.walk) * a;
-      const bob = Math.abs(Math.cos(this.walk)) * a * 0.08;
-      this.torso!.position.y = bob - (this.type === 'heavy' && this.windup > 0 ? 0.25 * Math.sin((1 - this.windup / 0.6) * Math.PI) : 0);
-      if (this.type === 'trooper') this.torso!.rotation.x = Math.max(-0.5, Math.min(0.5, -Math.atan2(dy, dist) * 0.5));
+    const aim = this.los ? -Math.atan2(p.pos.y + p.height * 0.6 - (this.pos.y + (fly ? 0 : def.height * 0.75)), dist) : 0;
+    if (this.type === 'trooper' || heavy) {
+      const amp = Math.min(1, hs / 1.5) * (heavy ? 0.42 : 0.62), sw = Math.sin(this.walk), cw = Math.cos(this.walk);
+      this.legs[0].rotation.x = -sw * amp; this.legs[1].rotation.x = sw * amp;
+      this.shins[0].rotation.x = Math.max(0, cw) * amp * 1.3 + 0.05;
+      this.shins[1].rotation.x = Math.max(0, -cw) * amp * 1.3 + 0.05;
+      const slam = heavy && this.windup > 0 ? Math.sin((1 - this.windup / 0.6) * Math.PI) : 0;
+      this.body.position.y = Math.abs(cw) * amp * 0.07 - slam * 0.22;
+      this.body.rotation.z = sw * amp * (heavy ? 0.07 : 0.04);
+      this.body.rotation.x = slam * 0.3;
+      const k = Math.min(1, dt * 8);
+      if (this.chest) this.chest.rotation.x += (Math.max(-0.5, Math.min(0.5, aim * 0.6)) - this.chest.rotation.x) * k;
+      this.head!.rotation.x += (Math.max(-0.4, Math.min(0.4, aim * 0.4)) - this.head!.rotation.x) * k;
     } else if (this.type === 'scuttler') {
-      for (let i = 0; i < this.legs.length; i++) {
-        const ph = this.walk + (i % 2 ? Math.PI : 0) + (i > 2 ? Math.PI : 0);
-        this.legs[i].rotation.y = Math.sin(ph) * 0.4;
-        this.legs[i].rotation.z = Math.max(0, Math.cos(ph)) * 0.25 * (i > 2 ? -1 : 1);
+      const m = Math.min(1, hs / 2);
+      for (let i = 0; i < 6; i++) {
+        const s = i < 3 ? 1 : -1, j = i % 3;
+        const ph = this.walk + ((j + (i < 3 ? 0 : 1)) % 2 ? Math.PI : 0);
+        this.legs[i].rotation.y = ((j === 0 ? -0.5 : j === 2 ? 0.5 : 0) + Math.sin(ph) * 0.34 * m) * s;
+        this.legs[i].rotation.z = Math.max(0, Math.cos(ph)) * 0.24 * m * s;
       }
       const w = this.windup > 0 ? 1 - this.windup / 0.32 : 0;
-      this.torso!.position.y = Math.sin(this.walk * 2) * 0.02 - w * 0.12;
-      this.torso!.rotation.x = -w * 0.35;
+      this.body.position.y = Math.sin(this.walk * 2) * 0.018 * m - w * 0.1;
+      this.body.rotation.x = -w * 0.38;
     } else {
-      for (const r of this.spin) r.rotation.y += dt * 40;
-      this.torso!.rotation.x = Math.max(-0.4, Math.min(0.4, hs * 0.05)) - Math.atan2(dy, dist) * 0.5;
-      this.torso!.rotation.z = Math.sin(this.age * 2.3) * 0.06;
+      for (const r of this.spin) r.rotation.y += dt * 38;
+      this.body.rotation.x = Math.max(-0.4, Math.min(0.4, hs * 0.05)) + aim * 0.5;
+      this.body.rotation.z = Math.sin(this.age * 2.3) * 0.06 - Math.max(-0.3, Math.min(0.3, (this.vel.x * Math.cos(this.yaw) - this.vel.z * Math.sin(this.yaw)) * 0.05));
       g.position.y += Math.sin(this.age * 3.1) * 0.05;
+    }
+
+    // Badly damaged robots smoke and spark.
+    if (this.hp < this.maxHp * 0.35) {
+      this.smokeT -= dt;
+      if (this.smokeT <= 0) {
+        this.smokeT = 0.1 + Math.random() * 0.16;
+        c.effects.puff(this.center(v1), 1, heavy ? 0.9 : 0.45, 0.1);
+        if (Math.random() < 0.3) c.effects.sparks(v1, v2.set(0, 1, 0), 3);
+      }
     }
 
     // Eye telegraphs an incoming attack; body flashes when hit.
@@ -361,11 +282,11 @@ export class Enemy {
     this.eye.color.setRGB(4 * tele, 0.7 * tele, 0.2 * tele);
     if (this.flash > 0) {
       this.flash = Math.max(0, this.flash - dt * 7);
-      this.body.emissive.setRGB(this.flash * 0.9, this.flash * 0.6, this.flash * 0.35);
+      this.hull.emissive.setRGB(this.flash * 0.9, this.flash * 0.6, this.flash * 0.35);
     }
   }
 
-  dispose() { this.body.dispose(); this.eye.dispose(); }
+  dispose() { this.hull.dispose(); this.eye.dispose(); }
 }
 
 export interface EnemyHit { enemy: Enemy; dist: number; crit: boolean; }

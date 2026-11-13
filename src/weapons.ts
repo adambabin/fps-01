@@ -6,7 +6,8 @@ import type { Input } from './input';
 import type { CollisionWorld } from './physics';
 import type { Player } from './player';
 import type { Settings } from './settings';
-import { makeFlashTexture, makeSurface } from './textures';
+import { buildGun, railGlow, type GunModel } from './gunModels';
+import { makeFlashTexture } from './textures';
 
 export interface WeaponDef {
   name: string; slot: string; sound: ShotKind; auto: boolean;
@@ -14,7 +15,7 @@ export interface WeaponDef {
   hip: number; ads: number; bloom: number; kickP: number; kickY: number;
   zoom: number; adsTime: number; falloff: [number, number, number];
   crit: number; pierce: boolean;
-  hipPos: [number, number, number]; sightY: number; adsZ: number;
+  hipPos: [number, number, number]; adsZ: number;
   tracer: [number, number, number];
 }
 
@@ -22,22 +23,22 @@ export const WEAPONS: WeaponDef[] = [
   {
     name: 'P-9 Sidearm', slot: 'Sidearm', sound: 'pistol', auto: false, damage: 30, pellets: 1, rpm: 420, mag: 12, reserve: Infinity, reload: 1.25,
     hip: 0.014, ads: 0.002, bloom: 0.012, kickP: 0.022, kickY: 0.008, zoom: 1.2, adsTime: 0.14, falloff: [18, 40, 0.6],
-    crit: 2, pierce: false, hipPos: [0.15, -0.15, -0.4], sightY: 0.047, adsZ: -0.5, tracer: [3, 2.2, 1.2],
+    crit: 2, pierce: false, hipPos: [0.12, -0.115, -0.44], adsZ: -0.5, tracer: [3, 2.2, 1.2],
   },
   {
     name: 'AR-7 Vector', slot: 'Rifle', sound: 'rifle', auto: true, damage: 21, pellets: 1, rpm: 680, mag: 30, reserve: 180, reload: 1.9,
     hip: 0.022, ads: 0.0035, bloom: 0.006, kickP: 0.012, kickY: 0.007, zoom: 1.35, adsTime: 0.2, falloff: [28, 60, 0.65],
-    crit: 1.8, pierce: false, hipPos: [0.17, -0.17, -0.36], sightY: 0.073, adsZ: -0.3, tracer: [3, 2.2, 1.2],
+    crit: 1.8, pierce: false, hipPos: [0.135, -0.155, -0.4], adsZ: -0.33, tracer: [3, 2.2, 1.2],
   },
   {
     name: 'SG-12 Breacher', slot: 'Shotgun', sound: 'shotgun', auto: false, damage: 13, pellets: 10, rpm: 78, mag: 6, reserve: 36, reload: 2.3,
     hip: 0.062, ads: 0.045, bloom: 0, kickP: 0.07, kickY: 0.015, zoom: 1.15, adsTime: 0.22, falloff: [8, 24, 0.25],
-    crit: 1.4, pierce: false, hipPos: [0.17, -0.17, -0.34], sightY: 0.044, adsZ: -0.24, tracer: [2.5, 1.8, 1],
+    crit: 1.4, pierce: false, hipPos: [0.135, -0.135, -0.38], adsZ: -0.3, tracer: [2.5, 1.8, 1],
   },
   {
     name: 'RX Lancer', slot: 'Railgun', sound: 'rail', auto: false, damage: 190, pellets: 1, rpm: 46, mag: 4, reserve: 20, reload: 2.6,
     hip: 0.03, ads: 0, bloom: 0, kickP: 0.09, kickY: 0.01, zoom: 2.6, adsTime: 0.28, falloff: [200, 300, 1],
-    crit: 2.2, pierce: true, hipPos: [0.18, -0.18, -0.34], sightY: 0.088, adsZ: -0.22, tracer: [0.6, 3, 5],
+    crit: 2.2, pierce: true, hipPos: [0.14, -0.165, -0.4], adsZ: -0.3, tracer: [0.6, 3, 5],
   },
 ];
 
@@ -49,106 +50,6 @@ export interface FireCtx {
   world: CollisionWorld; enemies: EnemyManager; effects: Effects; audio: AudioSys;
   camera: THREE.PerspectiveCamera;
   hitEnemy(e: Enemy, dmg: number, crit: boolean, point: THREE.Vector3, dir: THREE.Vector3): void;
-}
-
-// ---------- viewmodel construction ----------
-const gunMaps = makeSurface({ seed: 91, color: [255, 255, 255], panels: 0, roughness: 0.42, wear: 1.4, bump: 2 }, 256);
-const gunTex = { map: gunMaps.map, roughnessMap: gunMaps.roughnessMap, normalMap: gunMaps.normalMap };
-const metal = new THREE.MeshStandardMaterial({ ...gunTex, color: 0x24282d, metalness: 0.8, roughness: 1 });
-const metalLight = new THREE.MeshStandardMaterial({ ...gunTex, color: 0x3d434a, metalness: 0.85, roughness: 0.85 });
-const polymer = new THREE.MeshStandardMaterial({ color: 0x121416, metalness: 0.1, roughness: 0.7 });
-const glove = new THREE.MeshStandardMaterial({ color: 0x141516, metalness: 0.05, roughness: 0.85 });
-const sleeve = new THREE.MeshStandardMaterial({ color: 0x1b211f, metalness: 0.0, roughness: 0.95 });
-const redDot = new THREE.MeshBasicMaterial(); redDot.color.setRGB(6, 0.4, 0.3);
-const railGlow = new THREE.MeshBasicMaterial(); railGlow.color.setRGB(0.4, 2.4, 4);
-const UB = new THREE.BoxGeometry(1, 1, 1);
-const UC = new THREE.CylinderGeometry(0.5, 0.5, 1, 14); UC.rotateX(Math.PI / 2);
-
-function bx(g: THREE.Object3D, m: THREE.Material, w: number, h: number, d: number, x: number, y: number, z: number, rx = 0, ry = 0, rz = 0) {
-  const mesh = new THREE.Mesh(UB, m);
-  mesh.scale.set(w, h, d); mesh.position.set(x, y, z); mesh.rotation.set(rx, ry, rz);
-  g.add(mesh);
-  return mesh;
-}
-/** Cylinder along Z. */
-function cy(g: THREE.Object3D, m: THREE.Material, r: number, len: number, x: number, y: number, z: number) {
-  const mesh = new THREE.Mesh(UC, m);
-  mesh.scale.set(r * 2, r * 2, len); mesh.position.set(x, y, z);
-  g.add(mesh);
-  return mesh;
-}
-function arms(g: THREE.Object3D, gripY: number, gripZ: number, foreZ: number | null, foreY = -0.04) {
-  bx(g, glove, 0.05, 0.075, 0.06, 0.004, gripY, gripZ, -0.25);
-  bx(g, sleeve, 0.066, 0.07, 0.3, 0.04, gripY - 0.1, gripZ + 0.15, 0.6, -0.25, 0);
-  if (foreZ !== null) {
-    bx(g, glove, 0.062, 0.05, 0.085, -0.004, foreY, foreZ);
-  }
-}
-
-function buildGun(i: number): { group: THREE.Group; muzzle: THREE.Vector3 } {
-  const g = new THREE.Group();
-  let muzzle: THREE.Vector3;
-  if (i === 0) {
-    bx(g, metal, 0.03, 0.036, 0.19, 0, 0.02, -0.03);
-    bx(g, metalLight, 0.031, 0.012, 0.05, 0, 0.026, -0.06);
-    bx(g, polymer, 0.028, 0.024, 0.14, 0, -0.008, -0.02);
-    bx(g, polymer, 0.028, 0.1, 0.046, 0, -0.06, 0.05, -0.2);
-    bx(g, polymer, 0.008, 0.006, 0.05, 0, -0.032, -0.012);
-    bx(g, metal, 0.006, 0.009, 0.006, 0.009, 0.042, 0.058);
-    bx(g, metal, 0.006, 0.009, 0.006, -0.009, 0.042, 0.058);
-    bx(g, metalLight, 0.004, 0.009, 0.006, 0, 0.042, -0.118);
-    arms(g, -0.06, 0.055, null);
-    bx(g, glove, 0.05, 0.06, 0.05, -0.012, -0.075, 0.05, -0.2);
-    muzzle = new THREE.Vector3(0, 0.02, -0.15);
-  } else if (i === 1) {
-    bx(g, metal, 0.05, 0.075, 0.26, 0, 0, 0);
-    bx(g, metal, 0.03, 0.012, 0.42, 0, 0.043, -0.1);
-    bx(g, polymer, 0.047, 0.054, 0.25, 0, 0.004, -0.25);
-    for (let k = 0; k < 4; k++) bx(g, metal, 0.05, 0.01, 0.03, 0, 0.012, -0.17 - k * 0.05);
-    cy(g, metalLight, 0.011, 0.14, 0, 0.008, -0.44);
-    cy(g, metal, 0.017, 0.06, 0, 0.008, -0.53);
-    bx(g, polymer, 0.028, 0.13, 0.055, 0, -0.095, -0.04, 0.15);
-    bx(g, polymer, 0.03, 0.09, 0.042, 0, -0.075, 0.09, -0.3);
-    bx(g, polymer, 0.04, 0.065, 0.22, 0, -0.012, 0.23);
-    bx(g, polymer, 0.042, 0.09, 0.03, 0, -0.022, 0.34);
-    // Reflex sight: open frame with a glowing dot.
-    bx(g, metal, 0.044, 0.008, 0.045, 0, 0.053, -0.02);
-    bx(g, metal, 0.004, 0.038, 0.03, 0.02, 0.074, -0.02);
-    bx(g, metal, 0.004, 0.038, 0.03, -0.02, 0.074, -0.02);
-    bx(g, metal, 0.044, 0.004, 0.03, 0, 0.094, -0.02);
-    bx(g, redDot, 0.0028, 0.0028, 0.001, 0, 0.073, -0.02);
-    arms(g, -0.075, 0.095, -0.25, -0.04);
-    muzzle = new THREE.Vector3(0, 0.008, -0.58);
-  } else if (i === 2) {
-    bx(g, metal, 0.05, 0.07, 0.24, 0, 0, 0);
-    cy(g, metalLight, 0.015, 0.44, 0, 0.018, -0.33);
-    cy(g, metal, 0.013, 0.36, 0, -0.014, -0.29);
-    bx(g, polymer, 0.052, 0.046, 0.15, 0, -0.016, -0.26);
-    for (let k = 0; k < 5; k++) bx(g, metal, 0.054, 0.04, 0.008, 0, -0.016, -0.2 - k * 0.028);
-    bx(g, polymer, 0.04, 0.06, 0.26, 0, -0.022, 0.24);
-    bx(g, polymer, 0.03, 0.085, 0.042, 0, -0.07, 0.1, -0.35);
-    bx(g, metal, 0.02, 0.008, 0.2, 0, 0.037, 0);
-    bx(g, redDot, 0.005, 0.007, 0.005, 0, 0.039, -0.53);
-    arms(g, -0.07, 0.105, -0.26, -0.05);
-    muzzle = new THREE.Vector3(0, 0.018, -0.57);
-  } else {
-    bx(g, metal, 0.06, 0.085, 0.3, 0, 0, 0);
-    bx(g, metalLight, 0.05, 0.016, 0.52, 0, 0.03, -0.4);
-    bx(g, metalLight, 0.05, 0.016, 0.52, 0, -0.014, -0.4);
-    bx(g, railGlow, 0.018, 0.014, 0.5, 0, 0.008, -0.4);
-    for (let k = 0; k < 4; k++) bx(g, metal, 0.062, 0.074, 0.022, 0, 0.008, -0.2 - k * 0.12);
-    bx(g, polymer, 0.05, 0.06, 0.12, 0, -0.07, -0.02);
-    bx(g, railGlow, 0.052, 0.008, 0.08, 0, -0.07, -0.02);
-    bx(g, polymer, 0.03, 0.09, 0.042, 0, -0.08, 0.11, -0.3);
-    bx(g, polymer, 0.045, 0.07, 0.24, 0, -0.012, 0.26);
-    bx(g, metal, 0.02, 0.022, 0.06, 0, 0.052, -0.03);
-    const ring = new THREE.Mesh(new THREE.TorusGeometry(0.022, 0.003, 8, 24), metal);
-    ring.position.set(0, 0.088, -0.03); g.add(ring);
-    bx(g, railGlow, 0.003, 0.003, 0.001, 0, 0.088, -0.03);
-    arms(g, -0.08, 0.115, -0.2, -0.065);
-    muzzle = new THREE.Vector3(0, 0.008, -0.68);
-  }
-  return { group: g, muzzle };
 }
 
 const fwd = new THREE.Vector3(), right = new THREE.Vector3(), up = new THREE.Vector3(), dirv = new THREE.Vector3();
@@ -182,7 +83,8 @@ export class WeaponSystem {
   private swayY = 0;
   private sprintT = 0;
   private root = new THREE.Group();
-  private guns: { group: THREE.Group; muzzle: THREE.Vector3 }[] = [];
+  private guns: GunModel[] = [];
+  private pumpT = 0;
   private flash: THREE.Mesh;
   private flashT = 0;
   private muzzleLight: THREE.PointLight;
@@ -395,6 +297,7 @@ export class WeaponSystem {
     this.kick = Math.min(1.6, this.kick + (def.pellets > 1 || def.pierce ? 1.3 : def.auto ? 0.55 : 0.9));
     this.kickRot += def.kickP * 3;
     const gun = this.guns[this.current];
+    if (gun.pump) this.pumpT = 0.52;
     this.flash.position.copy(gun.muzzle).add(gun.group.position).setZ(gun.group.position.z + gun.muzzle.z - 0.03);
     this.flash.rotation.z = Math.random() * 6.28;
     this.flash.scale.setScalar((def.pellets > 1 ? 1.7 : def.pierce ? 1.4 : 1) * (0.8 + Math.random() * 0.5));
@@ -409,7 +312,7 @@ export class WeaponSystem {
   }
 
   private animate(dt: number, input: Input, player: Player) {
-    const def = this.def, g = this.guns[this.current].group, a = this.ads;
+    const def = this.def, gun = this.guns[this.current], g = gun.group, a = this.ads;
     const e = a * a * (3 - 2 * a);
     this.kick *= Math.exp(-14 * dt);
     this.kickRot *= Math.exp(-12 * dt);
@@ -421,7 +324,7 @@ export class WeaponSystem {
     const idle = Math.sin(performance.now() * 0.0016) * 0.0018 * (1 - e * 0.7);
 
     let x = def.hipPos[0] + (0 - def.hipPos[0]) * e;
-    let y = def.hipPos[1] + (-def.sightY - def.hipPos[1]) * e;
+    let y = def.hipPos[1] + (-gun.sightY - def.hipPos[1]) * e;
     let z = def.hipPos[2] + (def.adsZ - def.hipPos[2]) * e;
     let rx = 0, ry = 0, rz = 0;
 
@@ -446,6 +349,28 @@ export class WeaponSystem {
     const kz = this.kick * 0.028 * (1 - e * 0.45);
     g.position.set(x + bx_ + this.swayX, y + by + idle + this.swayY - player.vel.y * 0.0015 * (1 - e), z + kz);
     g.rotation.set(rx + this.kickRot * (1 - e * 0.6) + this.swayY * 2, ry + this.swayX * 3, rz + this.swayX * -4 * (1 - e));
+
+    // Moving parts: pistol slide, shotgun pump, magazines, railgun charge glow.
+    const st = this.state;
+    if (gun.slide) gun.slide.position.z = st.ammo === 0 && !this.reloading ? 0.032 : Math.min(0.034, this.kick * 0.032);
+    if (gun.pump) {
+      this.pumpT = Math.max(0, this.pumpT - dt);
+      const t = 1 - this.pumpT / 0.4;
+      gun.pump.position.z = this.pumpT > 0 && t > 0 ? Math.sin(t * Math.PI) * 0.075 : 0;
+    }
+    if (gun.mag) {
+      let d = 0;
+      if (this.reloadT > 0) {
+        const p = 1 - this.reloadT / this.reloadDur;
+        d = p < 0.2 ? 0 : p < 0.34 ? (p - 0.2) / 0.14 : p < 0.6 ? 1 : p < 0.78 ? 1 - (p - 0.6) / 0.18 : 0;
+      }
+      gun.mag.position.y = -d * 0.3;
+    }
+    if (def.pierce) {
+      const ready = st.ammo > 0 && !this.reloading ? Math.max(0.25, 1 - Math.max(0, this.cooldown) / (60 / def.rpm)) : 0.15;
+      const k = ready * (0.85 + Math.sin(performance.now() * 0.012) * 0.15);
+      railGlow.color.setRGB(0.4 * k, 2.4 * k, 4 * k);
+    }
   }
 
   /** Takes one grenade if available. */

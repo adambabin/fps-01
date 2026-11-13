@@ -50,7 +50,8 @@ scroll-to-switch. Every binding can be changed in Settings.
 | `src/game.ts` | Game state, wave director, render pipeline, combat callbacks |
 | `src/player.ts` | First-person movement and camera |
 | `src/weapons.ts` | Weapon stats, firing, viewmodels |
-| `src/enemies.ts` | Robot models, AI and hit detection |
+| `src/enemies.ts` | Robot AI, animation and hit detection |
+| `src/modelkit.ts`, `src/robotModels.ts`, `src/gunModels.ts` | Procedural model toolkit, robot and weapon models |
 | `src/entities.ts` | Projectiles and pickups |
 | `src/world.ts` | Arena geometry, lighting, collision boxes |
 | `src/physics.ts`, `src/nav.ts` | AABB collision and flow-field pathfinding |

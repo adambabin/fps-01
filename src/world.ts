@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
 import { CollisionWorld } from './physics';
-import { makeHazardTexture, makeSurface, type SurfaceMaps } from './textures';
+import { makeHazardTexture, makeRadialTexture, makeSurface, type SurfaceMaps } from './textures';
 
 export const ARENA = 30;
 export const CEIL = 9;
@@ -246,7 +246,7 @@ export class World {
     }
     const dg = new THREE.BufferGeometry();
     dg.setAttribute('position', new THREE.BufferAttribute(pos, 3));
-    this.dust = new THREE.Points(dg, new THREE.PointsMaterial({ color: 0x9fb4c8, size: 0.035, transparent: true, opacity: 0.5, depthWrite: false }));
+    this.dust = new THREE.Points(dg, new THREE.PointsMaterial({ color: 0x9fb4c8, size: 0.05, map: makeRadialTexture('rgba(255,255,255,1)', 'rgba(255,255,255,0)'), transparent: true, opacity: 0.4, depthWrite: false }));
     s.add(this.dust);
   }
 

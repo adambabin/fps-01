@@ -7,6 +7,13 @@ import type { Settings } from './settings';
 const STAND = 1.8, CROUCH = 1.15, RADIUS = 0.35;
 const WALK = 5.0, SPRINT = 7.6, CROUCH_SPEED = 2.6, ADS_SPEED = 3.2;
 const GRAVITY = 22, JUMP = 7.3;
+/** Tallest ledge walked up without jumping (stair treads are 0.2). */
+const STEP = 0.35;
+/**
+ * Fall damage from landing speed: nothing below SAFE_FALL (a drop of about 4 m, so one level
+ * plus a jump is free), then rising faster the harder the landing (~15 from 6 m, ~40 from 9 m).
+ */
+const SAFE_FALL = 13.2;
 /** Jumping out of a slide multiplies its speed by this, up to SLIDE_JUMP_MAX m/s. */
 const SLIDE_JUMP_BOOST = 1.2, SLIDE_JUMP_MAX = 12.5;
 
@@ -43,6 +50,10 @@ export class Player {
   private airLeft = 0;
   /** True on the frame a slide begins. */
   slideStarted = false;
+  /** Damage from a hard landing this frame; the game applies it and clears it. */
+  fallDamage = 0;
+  /** Eye offset that eases out after a step up or down, so stairs do not jolt the view. */
+  private stepEase = 0;
   /** Seconds since the last hit taken. */
   sinceHit = 99;
   shake = 0;
@@ -70,9 +81,28 @@ export class Player {
     this.crouching = false; this.height = STAND; this.crouchT = 0; this.landDip = 0;
     this.sliding = false; this.slideCd = 0;
     this.invuln = 0; this.airJumps = this.airLeft = 0; this.slideStarted = false;
+    this.fallDamage = this.stepEase = 0; this.grounded = true;
   }
 
-  get eye(): number { return 1.62 + (1.0 - 1.62) * this.crouchT - this.landDip; }
+  get eye(): number { return 1.62 + (1.0 - 1.62) * this.crouchT - this.landDip + this.stepEase; }
+
+  /**
+   * After a sideways move was blocked: tries the same move from one step higher and settles
+   * back down, which walks the player up stairs and low ledges. Returns true if it worked.
+   */
+  private stepUp(axis: 0 | 2, amt: number): boolean {
+    const c = this.c, h = this.h, x = c.x, y = c.y, z = c.z;
+    c.y += STEP;
+    if (!this.world.overlaps(c, h)) {
+      const blocked = this.world.moveAxis(c, h, axis, Math.sign(amt) * Math.max(Math.abs(amt), 0.02));
+      if (!blocked && this.world.moveAxis(c, h, 1, -STEP - 0.01) && c.y > y + 0.01) {
+        this.stepEase = Math.max(-0.5, this.stepEase - (c.y - y));
+        return true;
+      }
+    }
+    c.set(x, y, z);
+    return false;
+  }
   get dead(): boolean { return this.health <= 0; }
 
   /** Applies damage through armor. Returns the health actually lost. */
@@ -190,8 +220,9 @@ export class Player {
     const hh = this.height / 2;
     this.h.set(RADIUS, hh, RADIUS);
     this.c.set(this.pos.x, this.pos.y + hh, this.pos.z);
-    if (this.world.moveAxis(this.c, this.h, 0, this.vel.x * dt)) this.vel.x = 0;
-    if (this.world.moveAxis(this.c, this.h, 2, this.vel.z * dt)) this.vel.z = 0;
+    const canStep = this.grounded && this.vel.y <= 0;
+    if (this.world.moveAxis(this.c, this.h, 0, this.vel.x * dt) && !(canStep && this.stepUp(0, this.vel.x * dt))) this.vel.x = 0;
+    if (this.world.moveAxis(this.c, this.h, 2, this.vel.z * dt) && !(canStep && this.stepUp(2, this.vel.z * dt))) this.vel.z = 0;
     const fall = this.vel.y;
     const wasGrounded = this.grounded;
     this.grounded = false;
@@ -202,10 +233,18 @@ export class Player {
           const hard = Math.min(1, (-fall - 4) / 10);
           this.landDip = 0.08 + hard * 0.22;
           this.audio.land(hard);
+          const over = -fall - SAFE_FALL;
+          if (over > 0) this.fallDamage = 4 * over + 0.3 * over * over;
         }
       }
       this.vel.y = 0;
+    } else if (wasGrounded && this.vel.y <= 0) {
+      // Walking down stairs or a ramp: stay on the next tread instead of hopping off each one.
+      const y = this.c.y;
+      if (this.world.moveAxis(this.c, this.h, 1, -STEP)) { this.grounded = true; this.vel.y = 0; this.stepEase = Math.min(0.5, this.stepEase + (y - this.c.y)); }
+      else this.c.y = y;
     }
+    this.stepEase *= Math.exp(-14 * dt);
     this.pos.set(this.c.x, this.c.y - hh, this.c.z);
 
     // Bob, steps, misc

@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import type { AudioSys } from './audio';
 import type { Effects } from './effects';
 import type { Projectiles } from './entities';
-import type { FlowField } from './nav';
+import { ROBOT_STEP, type FlowField } from './nav';
 import { raySphere, type CollisionWorld } from './physics';
 import type { Player } from './player';
 import { createRobot } from './robotModels';
@@ -172,7 +172,11 @@ export class Enemy {
     // Desired velocity
     let wx = 0, wz = 0, wy = 0, speed = def.speed;
     const tx = dx / dist, tz = dz / dist;
-    const follow = () => { if (c.nav.dir(this.pos.x, this.pos.z, v3)) { wx = v3.x; wz = v3.z; } else { wx = tx; wz = tz; } };
+    // Routes from the flow field may lead off a ledge on purpose; any other movement stops at one.
+    let routed = false;
+    const follow = () => { if (c.nav.dir(this.pos.x, this.pos.y, this.pos.z, v3)) { wx = v3.x; wz = v3.z; routed = true; } else { wx = tx; wz = tz; } };
+    // On the player's level, as opposed to under or over them on another floor.
+    const level = Math.abs(dy) < 1.4;
     let facePlayer = this.los;
 
     if (this.type === 'scuttler') {
@@ -181,11 +185,11 @@ export class Enemy {
         if (this.windup <= 0) {
           this.attackCd = 1.0;
           c.audio.melee(this.pos);
-          if (dist < 2.6 && Math.abs(dy) < 2.6) c.hurtPlayer(8 * this.dmgMult, this.pos);
+          if (dist < 2.6 && Math.abs(dy) < 1.8) c.hurtPlayer(8 * this.dmgMult, this.pos);
         }
-      } else if (dist < 1.9 && Math.abs(dy) < 2.4 && this.attackCd <= 0) this.windup = 0.32;
-      else if (dist < 1.4) speed = 0;
-      else if (this.los && dist < 9) { wx = tx; wz = tz; }
+      } else if (dist < 1.9 && Math.abs(dy) < 1.6 && this.attackCd <= 0) this.windup = 0.32;
+      else if (dist < 1.4 && level) speed = 0;
+      else if (this.los && dist < 9 && level) { wx = tx; wz = tz; }
       else follow();
     } else if (this.type === 'trooper') {
       if (this.burst > 0) {
@@ -196,7 +200,7 @@ export class Enemy {
         this.windup -= dt; speed *= 0.2; wx = -tz * this.strafe; wz = tx * this.strafe;
         if (this.windup <= 0) { this.burst = 3; this.burstT = 0; }
       } else if (this.los && dist < 34 && this.attackCd <= 0 && this.age > 0.8 && c.shared.engaged < c.slots) { this.windup = 0.45; c.shared.engaged++; }
-      else if (this.los && dist < 7) { wx = -tx * 0.8 - tz * this.strafe * 0.6; wz = -tz * 0.8 + tx * this.strafe * 0.6; }
+      else if (this.los && dist < 7 && level) { wx = -tx * 0.8 - tz * this.strafe * 0.6; wz = -tz * 0.8 + tx * this.strafe * 0.6; }
       else if (this.los && dist < 19) { wx = -tz * this.strafe; wz = tx * this.strafe; speed *= 0.7; }
       else follow();
     } else if (this.type === 'heavy') {
@@ -205,13 +209,13 @@ export class Enemy {
         if (this.windup <= 0) {
           this.attackCd = 1.6;
           c.audio.explosion(this.pos, false);
-          v1.set(this.pos.x + tx * 1.6, 0.15, this.pos.z + tz * 1.6);
+          v1.set(this.pos.x + tx * 1.6, this.pos.y + 0.15, this.pos.z + tz * 1.6);
           c.effects.sparks(v1, v2.set(0, 1, 0), 20); c.effects.puff(v1, 6, 1.2, 0.2);
-          if (dist < 3.9 && Math.abs(dy) < 3) c.hurtPlayer(30 * this.dmgMult, this.pos);
+          if (dist < 3.9 && Math.abs(dy) < 2) c.hurtPlayer(30 * this.dmgMult, this.pos);
         }
-      } else if (dist < 3.3 && this.attackCd <= 0.6) this.windup = 0.6;
+      } else if (dist < 3.3 && level && this.attackCd <= 0.6) this.windup = 0.6;
       else {
-        if (dist > 5) follow(); else speed = 0;
+        if (dist > 5 || !level) follow(); else speed = 0;
         if (this.los && dist < 46 && this.attackCd <= 0 && this.age > 1) {
           this.side = -this.side;
           this.fire(c, 1.02 * this.side, 2.72, 0.6, 15, 28, 'rocket', 0.02, 0.3);
@@ -266,18 +270,27 @@ export class Enemy {
       }
     }
 
+    if (!fly && !routed && (wx || wz) && c.world.groundAt(this.pos.x + wx * 0.8, this.pos.z + wz * 0.8, this.pos.y + ROBOT_STEP) < this.pos.y - ROBOT_STEP) {
+      // Strafing or charging would walk off the edge of a deck: hold position instead.
+      wx = wz = 0; this.strafe = -this.strafe;
+    }
+
     // Integrate
     const acc = Math.min(1, dt * (fly ? 2.5 : 7));
     this.vel.x += (wx * speed - this.vel.x) * acc;
     this.vel.z += (wz * speed - this.vel.z) * acc;
     if (fly) this.vel.y += (wy * speed - this.vel.y) * acc;
+    const feet = this.pos.y;
     this.pos.addScaledVector(this.vel, dt);
     if (fly) {
       this.pos.y = Math.max(boss ? 4.4 : 1.4, Math.min(CEIL - (boss ? 2.5 : 1), this.pos.y));
       c.world.pushOutSphere(this.pos, def.radius + 0.1);
     } else {
-      this.pos.y = 0;
-      c.world.pushOutXZ(this.pos, def.radius, 0.25, Math.min(def.height, 1.6));
+      // Feet follow whatever is underneath: step up treads and low ledges, fall off edges.
+      const ground = c.world.groundAt(this.pos.x, this.pos.z, feet + ROBOT_STEP);
+      if (this.pos.y > ground + 0.02) this.vel.y -= 22 * dt;
+      else { this.vel.y = 0; this.pos.y = feet + (ground - feet) * Math.min(1, dt * 16); }
+      c.world.pushOutXZ(this.pos, def.radius, this.pos.y + ROBOT_STEP + 0.05, this.pos.y + Math.min(def.height, 1.6));
       // Keep ground robots from standing inside the player.
       if (dist < def.radius + 0.4 && Math.abs(dy) < def.height) { this.pos.x -= tx * (def.radius + 0.4 - dist); this.pos.z -= tz * (def.radius + 0.4 - dist); }
     }

@@ -21,6 +21,14 @@ export const hullTemplate = new THREE.MeshStandardMaterial({
 });
 export const eyeTemplate = new THREE.MeshBasicMaterial();
 
+/** Faint cool highlight on edges that face away from the camera, so robots keep a readable outline in dark arenas. */
+export function rimLight(s: { fragmentShader: string }) {
+  s.fragmentShader = s.fragmentShader.replace('#include <emissivemap_fragment>',
+    '#include <emissivemap_fragment>\ntotalEmissiveRadiance += vec3(0.3, 0.42, 0.6) * pow(1.0 - saturate(dot(normalize(vViewPosition), normal)), 3.0);');
+}
+hullTemplate.onBeforeCompile = rimLight;
+mechMat.onBeforeCompile = rimLight;
+
 const PALETTE: Record<RobotKind, { armor: number; paint: number; trim: number }> = {
   trooper: { armor: 0x6d7884, paint: 0x9a431f, trim: 0x2b3036 },
   scuttler: { armor: 0x6e6455, paint: 0x8a3c1c, trim: 0x2c2823 },
@@ -307,6 +315,7 @@ export function createRobot(kind: RobotKind): RobotModel {
   }
   const root = t.clone(true);
   const hull = hullTemplate.clone(), eye = eyeTemplate.clone();
+  hull.onBeforeCompile = rimLight;
   root.traverse((o) => {
     const m = o as THREE.Mesh;
     if (!m.isMesh) return;

@@ -125,6 +125,17 @@ export class AudioSys {
     this.noise({ gain: 0.3, dur: 0.05, freq: 2600, type: 'bandpass', q: 7, delay: dur * 0.88 });
   }
 
+  /** One step of a reload, played when the animation reaches it. */
+  reloadStep(kind: 'out' | 'in' | 'rack' | 'shell' | 'open' | 'close' | 'grab') {
+    if (kind === 'grab') this.noise({ gain: 0.1, dur: 0.05, freq: 700, type: 'bandpass', q: 2 });
+    else if (kind === 'out') { this.noise({ gain: 0.24, dur: 0.05, freq: 1700, type: 'bandpass', q: 5 }); this.noise({ gain: 0.12, dur: 0.12, freq: 600, freqEnd: 300, type: 'bandpass', q: 2, delay: 0.03 }); }
+    else if (kind === 'in') { this.noise({ gain: 0.32, dur: 0.05, freq: 1100, type: 'bandpass', q: 4 }); this.noise({ gain: 0.2, dur: 0.04, freq: 2600, type: 'bandpass', q: 6, delay: 0.035 }); }
+    else if (kind === 'rack') { this.noise({ gain: 0.26, dur: 0.06, freq: 2200, type: 'bandpass', q: 6 }); this.noise({ gain: 0.32, dur: 0.05, freq: 3000, type: 'bandpass', q: 7, delay: 0.09 }); }
+    else if (kind === 'shell') { this.noise({ gain: 0.22, dur: 0.05, freq: 1500, type: 'bandpass', q: 4 }); this.noise({ gain: 0.12, dur: 0.03, freq: 3200, type: 'bandpass', q: 6, delay: 0.04 }); }
+    else if (kind === 'open') this.noise({ gain: 0.22, dur: 0.08, freq: 1300, freqEnd: 2200, type: 'bandpass', q: 4 });
+    else this.noise({ gain: 0.34, dur: 0.06, freq: 1900, type: 'bandpass', q: 5 });
+  }
+
   swap() { this.noise({ gain: 0.14, dur: 0.09, freq: 900, type: 'bandpass', q: 2 }); }
 
   hit(crit: boolean) {

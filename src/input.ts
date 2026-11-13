@@ -60,7 +60,10 @@ export class Input {
     window.addEventListener('wheel', (e) => {
       if (!this.lookActive()) return;
       // Firefox often reports lines or pages rather than pixels; convert so one notch is ~100 px everywhere.
-      this.wheel += e.deltaY * (e.deltaMode === 1 ? 33 : e.deltaMode === 2 ? 800 : 1);
+      // Holding Shift (sprint) turns vertical scrolling sideways on macOS and some Windows
+      // browsers, so the movement arrives as deltaX; read it so sprinting players can switch.
+      const d = e.deltaY !== 0 ? e.deltaY : e.shiftKey ? e.deltaX : 0;
+      this.wheel += d * (e.deltaMode === 1 ? 33 : e.deltaMode === 2 ? 800 : 1);
       e.preventDefault();
     }, { passive: false });
     window.addEventListener('contextmenu', (e) => e.preventDefault());

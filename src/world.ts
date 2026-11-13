@@ -103,14 +103,18 @@ function bevelBox(sx: number, sy: number, sz: number, texSize: number, r: number
  * Patches a standard material so large surfaces stop looking tiled: world-space noise varies colour and
  * roughness over several metres, and vertical faces darken toward the floor like settled grime.
  */
+/** Colour of the light pools under the ceiling lamps; black in arenas without them. Shared by every weathered material. */
+const poolColor = { value: new THREE.Color(0, 0, 0) };
+
 function weather(mat: THREE.MeshStandardMaterial, tex: THREE.Texture): THREE.MeshStandardMaterial {
   mat.onBeforeCompile = (s) => {
     s.uniforms.macroMap = { value: tex };
+    s.uniforms.poolColor = poolColor;
     s.vertexShader = s.vertexShader
       .replace('#include <common>', '#include <common>\nvarying vec3 vMacroP;\nvarying vec3 vMacroN;')
       .replace('#include <begin_vertex>', '#include <begin_vertex>\nvMacroP = (modelMatrix * vec4(transformed, 1.0)).xyz;\nvMacroN = mat3(modelMatrix) * objectNormal;');
     s.fragmentShader = s.fragmentShader
-      .replace('#include <common>', '#include <common>\nuniform sampler2D macroMap;\nvarying vec3 vMacroP;\nvarying vec3 vMacroN;\nfloat macroV;')
+      .replace('#include <common>', '#include <common>\nuniform sampler2D macroMap;\nuniform vec3 poolColor;\nvarying vec3 vMacroP;\nvarying vec3 vMacroN;\nfloat macroV;\nvec3 macroPool;')
       .replace('#include <map_fragment>', `#include <map_fragment>
         {
           vec3 an = abs(vMacroN);
@@ -118,7 +122,12 @@ function weather(mat: THREE.MeshStandardMaterial, tex: THREE.Texture): THREE.Mes
           macroV = texture2D(macroMap, muv * 0.043).r * 0.65 + texture2D(macroMap, muv * 0.19 + 0.37).g * 0.35;
           diffuseColor.rgb *= mix(0.55, 1.12, smoothstep(0.3, 0.7, macroV));
           if (an.y <= 0.6) diffuseColor.rgb *= 0.58 + 0.42 * smoothstep(0.0, 1.5, vMacroP.y);
+          // Pools of light under the ceiling lamps (a 12 m grid), on anything facing up below them.
+          vec2 pq = mod(vMacroP.xz + 24.0, 12.0) - 6.0;
+          float pool = max(0.0, 1.0 - length(pq) / 4.5);
+          macroPool = vMacroN.y > 0.6 && vMacroP.y < 4.0 ? diffuseColor.rgb * poolColor * pool * pool : vec3(0.0);
         }`)
+      .replace('#include <emissivemap_fragment>', '#include <emissivemap_fragment>\ntotalEmissiveRadiance += macroPool;')
       .replace('#include <roughnessmap_fragment>', '#include <roughnessmap_fragment>\nroughnessFactor = clamp(roughnessFactor * mix(1.35, 0.7, smoothstep(0.3, 0.7, macroV)), 0.04, 1.0);');
   };
   return mat;
@@ -132,7 +141,7 @@ function shaftMaterial(): THREE.ShaderMaterial {
       void main() { vec4 mv = modelViewMatrix * vec4(position, 1.0); vN = normalize(normalMatrix * normal); vV = normalize(-mv.xyz); vH = uv.y; gl_Position = projectionMatrix * mv; }`,
     fragmentShader: `uniform vec3 color; varying vec3 vN; varying vec3 vV; varying float vH;
       void main() { float f = pow(abs(dot(normalize(vN), normalize(vV))), 2.2); gl_FragColor = vec4(color * f * (0.15 + 0.85 * vH * vH) * smoothstep(0.0, 0.12, vH), 1.0); }`,
-    transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide,
+    transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.BackSide,
   });
 }
 
@@ -172,12 +181,14 @@ export class World {
   weather: 'none' | 'rain' | 'snow' = 'none';
   private theme: Theme = THEMES.reactor;
   /** Set dressing waiting to be merged into one mesh per material at the end of `load`. */
-  private batches = new Map<string, { mat: THREE.Material; cast: boolean; geos: THREE.BufferGeometry[] }>();
+  private batches = new Map<string, { mat: THREE.Material; cast: boolean; receive: boolean; late: boolean; geos: THREE.BufferGeometry[] }>();
+  /** True while the floor, walls and ceiling are being built: they are drawn after everything else so the props in front hide them first. */
+  private late = false;
   private envTarget: THREE.WebGLRenderTarget | null = null;
   /** Neutral studio reflections; the weapon viewmodel always uses these so it reads the same in every arena. */
   readonly studioEnv: THREE.Texture;
   private signs = new Map<string, THREE.Material>();
-  private fx: { stain: THREE.MeshBasicMaterial; pool: THREE.MeshBasicMaterial; shaft: THREE.ShaderMaterial; screen: THREE.MeshBasicMaterial; inlay: THREE.MeshBasicMaterial };
+  private fx: { stain: THREE.MeshBasicMaterial; shaft: THREE.ShaderMaterial; screen: THREE.MeshBasicMaterial; inlay: THREE.MeshBasicMaterial };
   private m: {
     floor: THREE.MeshStandardMaterial; wall: THREE.MeshStandardMaterial; pillar: THREE.MeshStandardMaterial;
     crate: THREE.MeshStandardMaterial; crate2: THREE.MeshStandardMaterial; contA: THREE.MeshStandardMaterial; contB: THREE.MeshStandardMaterial;
@@ -210,7 +221,7 @@ export class World {
       blending: additive ? THREE.AdditiveBlending : THREE.NormalBlending,
     });
     this.fx = {
-      stain: flat(makeStainTexture(), 0.62), pool: flat(makeRadialTexture('rgba(255,255,255,1)', 'rgba(255,255,255,0)'), 1, true),
+      stain: flat(makeStainTexture(), 0.62),
       shaft: shaftMaterial(), screen: glow(1, 1, 1), inlay: glow(1, 1, 1),
     };
     this.m = {
@@ -290,7 +301,8 @@ export class World {
     this.envTarget?.dispose(); this.envTarget = null;
     this.scene.environment = t.ownEnv ? this.themedEnv(t) : this.studioEnv;
     const f = this.fx, k = (c: [number, number, number], s: number) => [c[0] * s, c[1] * s, c[2] * s] as const;
-    f.shaft.uniforms.color.value.setRGB(...k(t.panel, 0.022)); f.pool.color.setRGB(...k(t.panel, 0.05));
+    f.shaft.uniforms.color.value.setRGB(...k(t.panel, 0.04));
+    poolColor.value.setRGB(0, 0, 0);
     f.screen.color.setRGB(...k(t.stripA, 0.2)); f.inlay.color.setRGB(...k(t.stripA, 0.28));
     this.weather = t.weather ?? 'none';
     this.rain.visible = t.weather === 'rain'; this.snowfall.visible = t.weather === 'snow';
@@ -302,7 +314,7 @@ export class World {
     this.corners.forEach((l, i) => { l.color.setHex(t.corners[i === 0 || i === 3 ? 0 : 1]); l.intensity = t.cornerI; });
     this.coreLight.color.setHex(t.coreLight); this.coreLight.position.set(0, t.coreY, 0);
 
-    this.shell();
+    this.late = true; this.shell(); this.late = false;
     if (id === 'reactor') this.buildReactor(); else if (id === 'foundry') this.buildFoundry(); else if (id === 'vault') this.buildVault();
     else if (id === 'yard') this.buildYard(); else this.buildFrost();
     this.flush();
@@ -339,14 +351,14 @@ export class World {
   }
 
   /** Queues non-colliding set dressing. Everything queued for one material becomes a single mesh. */
-  private d(geo: THREE.BufferGeometry, mat: THREE.Material, x: number, y: number, z: number, o: { rx?: number; ry?: number; rz?: number; cast?: boolean } = {}) {
+  private d(geo: THREE.BufferGeometry, mat: THREE.Material, x: number, y: number, z: number, o: { rx?: number; ry?: number; rz?: number; cast?: boolean; receive?: boolean } = {}) {
     if (o.rx) geo.rotateX(o.rx);
     if (o.rz) geo.rotateZ(o.rz);
     if (o.ry) geo.rotateY(o.ry);
     geo.translate(x, y, z);
-    const cast = o.cast ?? true, key = mat.uuid + (cast ? 'c' : 'n');
+    const cast = o.cast ?? true, receive = o.receive ?? cast, key = mat.uuid + (cast ? 'c' : 'n') + (receive ? 'r' : 'n') + (this.late ? 'l' : 'e');
     let b = this.batches.get(key);
-    if (!b) this.batches.set(key, b = { mat, cast, geos: [] });
+    if (!b) this.batches.set(key, b = { mat, cast, receive, late: this.late, geos: [] });
     b.geos.push(geo);
   }
 
@@ -363,12 +375,13 @@ export class World {
 
   private flush() {
     for (const b of this.batches.values()) {
-      const merged = mergeGeometries(b.geos.map((g) => (g.index ? g.toNonIndexed() : g)));
+      const indexed = b.geos.every((g) => g.index);
+      const merged = mergeGeometries(indexed ? b.geos : b.geos.map((g) => (g.index ? g.toNonIndexed() : g)));
       for (const g of b.geos) g.dispose();
       const mesh = new THREE.Mesh(merged, b.mat);
-      mesh.castShadow = b.cast; mesh.receiveShadow = b.cast;
+      mesh.castShadow = b.cast; mesh.receiveShadow = b.receive;
       mesh.matrixAutoUpdate = false;
-      if (b.mat === this.fx.shaft) mesh.renderOrder = 9;
+      if (b.mat === this.fx.shaft) mesh.renderOrder = 9; else if (b.late && !b.mat.transparent) mesh.renderOrder = 1;
       this.group.add(mesh);
     }
     this.batches.clear();
@@ -383,26 +396,20 @@ export class World {
     this.d(new THREE.PlaneGeometry(w, w * (96 / 512)), mat, x, y, z, { ry, cast: false });
   }
 
-  /** Light cones and floor pools under the ceiling lamps. */
+  /** Light cones under the ceiling lamps; the pools they throw on the floor are drawn by the surface shader. */
   private shafts() {
+    poolColor.value.setRGB(this.theme.panel[0] * 0.16, this.theme.panel[1] * 0.16, this.theme.panel[2] * 0.16);
     for (let x = -18; x <= 18; x += 12) for (let z = -18; z <= 18; z += 12) {
       this.d(new THREE.CylinderGeometry(1.3, 3.4, CEIL - 0.2, 24, 1, true), this.fx.shaft, x, (CEIL - 0.2) / 2, z, { cast: false });
-      this.d(new THREE.PlaneGeometry(9, 9), this.fx.pool, x, 0.015, z, { rx: -Math.PI / 2, cast: false });
     }
   }
 
   private box(cx: number, cy: number, cz: number, sx: number, sy: number, sz: number, mat: THREE.Material, o: BoxOpts = {}) {
     // Free-standing props get rounded edges; the shell and thin trim stay as plain boxes.
     const bevel = (o.cast ?? true) && Math.min(sx, sy, sz) >= 0.4 && Math.max(sx, sy, sz) <= 12;
-    const mesh = new THREE.Mesh(bevel ? bevelBox(sx, sy, sz, o.tex ?? 3, 0.035) : scaledBox(sx, sy, sz, o.tex ?? 3), mat);
-    mesh.position.set(cx, cy, cz);
-    mesh.castShadow = o.cast ?? true;
-    mesh.receiveShadow = o.receive ?? true;
-    mesh.matrixAutoUpdate = false;
-    mesh.updateMatrix();
-    this.group.add(mesh);
+    // Static, so it joins the per-material batch instead of becoming its own draw call.
+    this.d(bevel ? bevelBox(sx, sy, sz, o.tex ?? 3, 0.035) : scaledBox(sx, sy, sz, o.tex ?? 3), mat, cx, cy, cz, { cast: o.cast ?? true, receive: o.receive ?? true });
     if (o.collide ?? true) this.collision.add(cx, cy, cz, sx, sy, sz);
-    return mesh;
   }
 
   /** Non-colliding decorative mesh. */
@@ -416,7 +423,7 @@ export class World {
 
   /** Glowing strip with no collision or shadows. */
   private lamp(cx: number, cy: number, cz: number, sx: number, sy: number, sz: number, mat: THREE.Material) {
-    return this.box(cx, cy, cz, sx, sy, sz, mat, { collide: false, cast: false, receive: false });
+    this.box(cx, cy, cz, sx, sy, sz, mat, { collide: false, cast: false, receive: false });
   }
 
   /** Low cover wall with a dark cap. */

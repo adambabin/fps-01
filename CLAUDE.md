@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Clanker Survival: a browser-based single-player wave-survival FPS (Three.js + TypeScript + Vite). Everything is procedural — there are no asset files. Textures, models and audio are all generated in code, and that is a deliberate constraint, not a placeholder.
 
-The game was originally called RUSTWAKE. The `localStorage` keys in `settings.ts` (`rustwake.settings.v1`, `rustwake.best`) intentionally keep the old name so existing players don't lose their settings and best wave. Don't rename them without a migration.
+The game was originally called RUSTWAKE. The `localStorage` keys in `settings.ts` (`rustwake.settings.v2`, `rustwake.best`) intentionally keep the old name so existing players don't lose their settings and best wave. Don't rename them without a migration.
 
 Work is tracked in the Notion database "Clanker Survival Game Backlog" (Kanban grouped by Status: Backlog → In progress → Pending testing → Closed). When finishing a ticket, move it to Pending testing rather than Closed; the user closes tickets after testing.
 

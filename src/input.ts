@@ -10,6 +10,12 @@ export class Input {
   capture: ((code: string) => void) | null = null;
   /** Mouse-look is only accumulated while this returns true. */
   lookActive: () => boolean = () => true;
+  /** Actions held by on-screen touch buttons, read alongside the key binds. */
+  private virtual = new Set<Action>();
+  private virtualPressed = new Set<Action>();
+  /** Analog move stick (strafe, forward) in -1..1, added to the movement keys. */
+  moveX = 0;
+  moveY = 0;
 
   constructor(private settings: Settings) {
     window.addEventListener('keydown', (e) => {
@@ -50,15 +56,26 @@ export class Input {
     window.addEventListener('blur', () => this.reset());
   }
 
-  reset() { this.down.clear(); this.pressed.clear(); this.dx = this.dy = this.wheel = 0; }
+  reset() {
+    this.down.clear(); this.pressed.clear(); this.dx = this.dy = this.wheel = 0;
+    this.virtual.clear(); this.virtualPressed.clear(); this.moveX = this.moveY = 0;
+  }
+
+  virtualDown(a: Action) {
+    if (!this.virtual.has(a)) this.virtualPressed.add(a);
+    this.virtual.add(a);
+  }
+  virtualUp(a: Action) { this.virtual.delete(a); }
 
   isDown(a: Action): boolean {
+    if (this.virtual.has(a)) return true;
     for (const c of this.settings.binds[a]) if (this.down.has(c)) return true;
     return false;
   }
   wasPressed(a: Action): boolean {
+    if (this.virtualPressed.has(a)) return true;
     for (const c of this.settings.binds[a]) if (this.pressed.has(c)) return true;
     return false;
   }
-  endFrame() { this.pressed.clear(); this.dx = 0; this.dy = 0; }
+  endFrame() { this.pressed.clear(); this.virtualPressed.clear(); this.dx = 0; this.dy = 0; }
 }

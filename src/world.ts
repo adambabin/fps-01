@@ -55,9 +55,10 @@ const THEMES: Record<ArenaId, Theme> = {
   frost: {
     floor: 0xf4f7fb, wall: 0xc9d2dc, trim: 0xd9e0e8, dark: 0x4b535e,
     stripA: [3.4, 2.2, 0.8], stripB: [3.4, 2.2, 0.8], core: [4, 0.5, 0.3], panel: [2.6, 2.7, 3.0],
-    fog: 0xaebccb, fogDensity: 0.02, hemiSky: 0xdfeaf7, hemiGround: 0xa9b6c6, hemi: 1.35, sun: 0xffffff, sunI: 1.5,
-    corners: [0xfff2e0, 0xe6f0ff], cornerI: 60, coreLight: 0xff5a40, coreI: 40, coreY: 8,
-    outdoor: true, sky: 0xaebccb, weather: 'snow', env: 0.7,
+    // Kept dim on purpose: lit snow must stay below the bloom threshold (1.0) or it glows and washes out the view.
+    fog: 0x8e9bab, fogDensity: 0.016, hemiSky: 0xb8c6d6, hemiGround: 0x5a6573, hemi: 0.75, sun: 0xfff1de, sunI: 1.25,
+    corners: [0xfff2e0, 0xe6f0ff], cornerI: 45, coreLight: 0xff5a40, coreI: 40, coreY: 8,
+    outdoor: true, sky: 0x8e9bab, weather: 'snow', env: 0.3,
   },
 };
 
@@ -131,7 +132,7 @@ export class World {
     const wallMaps = makeSurface({ seed: 23, color: [104, 108, 112], panels: 2, stagger: true, ribs: 8, roughness: 0.62, wear: 0.9, bump: 5 });
     const crateMaps = makeSurface({ seed: 37, color: [128, 122, 108], panels: 1, frame: true, rivets: true, roughness: 0.58, wear: 1.2, bump: 6 });
     const plainMaps = makeSurface({ seed: 51, color: [70, 73, 78], panels: 0, roughness: 0.48, wear: 1.1, bump: 3 }, 256);
-    const snowMaps = makeSurface({ seed: 71, color: [240, 244, 250], panels: 0, roughness: 0.92, wear: 0.25, bump: 2.5 }, 256);
+    const snowMaps = makeSurface({ seed: 71, color: [200, 207, 216], panels: 0, roughness: 0.95, wear: 0.3, bump: 3.5 }, 256);
     const asphaltMaps = makeSurface({ seed: 83, color: [62, 65, 70], panels: 0, roughness: 0.5, wear: 0.9, bump: 3 }, 256);
     const hazard = makeHazardTexture();
     hazard.repeat.set(3, 0.5);

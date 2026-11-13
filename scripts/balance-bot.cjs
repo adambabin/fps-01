@@ -27,6 +27,8 @@ const { chromium } = require('playwright');
           if (g.state !== 'playing') break;
           const dt = 1 / 60, pl = g.player, w = g.weapons, inp = g.input;
           inp.down.clear();
+          // After a boss the run waits for the ready key before changing arena.
+          if (g.awaitReady) inp.pressed.add('Enter');
           eye.set(pl.pos.x, pl.pos.y + pl.eye, pl.pos.z);
           // Target selection: nearest visible robot, re-evaluated a few times a second.
           if (i % 15 === 0 || !target || !target.alive) {

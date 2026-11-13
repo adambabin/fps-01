@@ -13,7 +13,7 @@ export const ARENAS: Record<ArenaId, { name: string; blurb: string }> = {
   reactor: { name: 'Reactor Hall', blurb: 'Open floor around the core. Long sightlines, scattered cover.' },
   foundry: { name: 'Foundry', blurb: 'Furnaces and conveyor lines around a molten crucible.' },
   vault: { name: 'Server Vault', blurb: 'Tight aisles between server racks. Close-quarters fighting.' },
-  yard: { name: 'Rain Yard', blurb: 'Outdoors at night in the rain. Lanes between stacked containers.' },
+  yard: { name: 'Rain Yard', blurb: 'Outdoors at night in the rain. Three levels: container lanes, catwalks, and bridges across the stacks.' },
   frost: { name: 'Frost Outpost', blurb: 'Outdoors in falling snow. Huts, snow banks and a radio mast.' },
 };
 
@@ -24,6 +24,8 @@ interface Theme {
   corners: [number, number]; cornerI: number; coreLight: number; coreI: number; coreY: number;
   /** Outdoor arenas have no roof, a lower perimeter wall, a sky colour and weather. */
   outdoor?: boolean; sky?: number; weather?: 'rain' | 'snow'; floorRough?: number; env?: number;
+  /** Height of an outdoor arena's perimeter wall (default 5); raise it where upper levels would see over. */
+  wallH?: number;
 }
 
 const THEMES: Record<ArenaId, Theme> = {
@@ -50,7 +52,7 @@ const THEMES: Record<ArenaId, Theme> = {
     stripA: [3.4, 2.6, 1.2], stripB: [0.5, 2.2, 3.2], core: [3.2, 2.9, 2.2], panel: [2.6, 2.7, 3.0],
     fog: 0x0b1017, fogDensity: 0.024, hemiSky: 0x7f95b8, hemiGround: 0x20242a, hemi: 0.75, sun: 0xa9bfe8, sunI: 0.9,
     corners: [0xfff0d0, 0xdfe9ff], cornerI: 230, coreLight: 0xfff2d8, coreI: 130, coreY: 7,
-    outdoor: true, sky: 0x0b1017, weather: 'rain', floorRough: 0.5, env: 0.5,
+    outdoor: true, sky: 0x0b1017, weather: 'rain', floorRough: 0.5, env: 0.5, wallH: 9,
   },
   frost: {
     floor: 0xf4f7fb, wall: 0xc9d2dc, trim: 0xd9e0e8, dark: 0x4b535e,
@@ -259,7 +261,7 @@ export class World {
 
   /** Floor, walls, ceiling, wall fixtures and the four spawn gates shared by every arena. */
   private shell() {
-    const A = ARENA, m = this.m, out = !!this.theme.outdoor, H = out ? 5 : CEIL;
+    const A = ARENA, m = this.m, out = !!this.theme.outdoor, H = out ? this.theme.wallH ?? 5 : CEIL;
     const floor = this.theme.weather === 'snow' ? m.snowFloor : this.theme.weather === 'rain' ? m.asphalt : m.floor;
     this.box(0, -0.5, 0, A * 2, 1, A * 2, floor, { cast: false, tex: 4 });
     // Outdoors the "ceiling" is only an invisible lid so thrown grenades and the boss stay in bounds.
@@ -335,6 +337,47 @@ export class World {
       if (gate.dir.x !== 0) haz.rotation.z = Math.PI / 2;
       haz.position.copy(gate.pos).addScaledVector(gate.dir, 2.2).setY(0.012);
       haz.receiveShadow = true;
+    }
+  }
+
+  /**
+   * Stairs or a ramp from height y0 up to y1. (x, z) is the middle of the bottom edge; the
+   * flight runs `run` metres along `axis` in direction `sign`. Collision is always a row of
+   * boxes: 0.2 m treads for stairs, and finer hidden ones under a ramp's sloped plate, which the
+   * player's and robots' step-up turns into a smooth climb. Keep the slope at or below 0.4
+   * (rise / run) so neighbouring navigation cells stay within a robot's step, and make it at
+   * least 2.5 m wide: robots only route along cells whose centre is clear of the edge. `solid` fills
+   * the stairs down to the ground; otherwise there is room to pass underneath.
+   */
+  private flight(x: number, z: number, axis: 'x' | 'z', sign: number, run: number, width: number, y0: number, y1: number, o: { ramp?: boolean; solid?: boolean } = {}) {
+    const m = this.m, rise = y1 - y0, n = Math.round(rise / (o.ramp ? 0.13 : 0.2)), tread = run / n, r = rise / n, ax = axis === 'x';
+    for (let i = 0; i < n; i++) {
+      const top = y0 + (i + 1) * r, base = o.solid ? 0 : top - 0.3, at = (i + 0.5) * tread * sign;
+      const cx = ax ? x + at : x, cz = ax ? z : z + at, sx = ax ? tread : width, sz = ax ? width : tread;
+      if (o.ramp) this.collision.add(cx, (top + base) / 2, cz, sx, top - base, sz);
+      else this.box(cx, (top + base) / 2, cz, sx, top - base, sz, i % 2 ? m.trim : m.dark, { tex: 2 });
+    }
+    const a = Math.atan2(rise, run), len = Math.hypot(run, rise), mx = ax ? x + (run / 2) * sign : x, mz = ax ? z : z + (run / 2) * sign;
+    const tilt = (mesh: THREE.Mesh) => { if (ax) mesh.rotation.z = a * sign; else mesh.rotation.x = -a * sign; };
+    if (o.ramp) {
+      const plate = this.deco(scaledBox(ax ? len : width, 0.24, ax ? width : len, 2), m.trim, mx, y0 + rise / 2 + r / 2 - 0.12 / Math.cos(a), mz);
+      tilt(plate);
+    }
+    // Glowing edge strips so the way up reads in the dark.
+    for (const s of [-1, 1]) {
+      const e = (width / 2 + 0.02) * s;
+      const strip = this.deco(new THREE.BoxGeometry(ax ? len : 0.04, 0.06, ax ? 0.04 : len), m.stripA, ax ? mx : mx + e, y0 + rise / 2 + r / 2 - 0.05, ax ? mz + e : mz, false);
+      tilt(strip);
+    }
+  }
+
+  /** Flat walkway whose top is at `top`, with lit edges along its long sides. Open underneath. */
+  private deck(cx: number, cz: number, sx: number, sz: number, top: number) {
+    const m = this.m;
+    this.box(cx, top - 0.1, cz, sx, 0.2, sz, m.dark, { tex: 2 });
+    for (const s of [-1, 1]) {
+      if (sx >= sz) this.lamp(cx, top - 0.1, cz + (sz / 2 + 0.02) * s, sx, 0.06, 0.04, m.stripB);
+      else this.lamp(cx + (sx / 2 + 0.02) * s, top - 0.1, cz, 0.04, 0.06, sz, m.stripB);
     }
   }
 
@@ -452,9 +495,13 @@ export class World {
     for (const s of [1, -1]) this.barrier(0, 13.5 * s, 4, 0.5);
   }
 
-  /** Stacks of shipping containers forming lanes, a parked hauler in the middle. */
+  /**
+   * Stacks of shipping containers forming lanes, a parked hauler in the middle, and two upper
+   * levels: catwalks at single-container height (2.6) reached by stairs or ramps, and bridges
+   * across the double stacks (5.2) reached by stairs from the catwalk level.
+   */
   private buildYard() {
-    const m = this.m;
+    const m = this.m, L2 = 2.6, L3 = 5.2;
     const container = (x: number, z: number, alongX: boolean, mat: THREE.Material, stack = 1) => {
       for (let i = 0; i < stack; i++) {
         this.box(x, 1.3 + i * 2.6, z, alongX ? 6.2 : 2.6, 2.6, alongX ? 2.6 : 6.2, mat, { tex: 2.6 });
@@ -477,7 +524,21 @@ export class World {
       this.box(5 * qx, 0.6, 22 * qz, 1.2, 1.2, 1.2, m.crate, { tex: 1.2 });
       this.barrier(5.5 * qx, 11.5 * qz, 3.5, 0.6);
       this.vents.push(new THREE.Vector3(15 * qx, 9, 15 * qz));
+      // Level 2: up onto the single container by the gate lane (stairs in two corners, ramps in
+      // the other two), then a catwalk round to the single container on the side lane.
+      this.flight(20.6 * qx, 19.5 * qz, 'x', -qx, 6.5, 2.6, 0, L2, qx * qz > 0 ? { solid: true } : { ramp: true });
+      this.deck(13.2 * qx, 15.25 * qz, 2.4, 5.9, L2);
+      this.deck(17.05 * qx, 13.35 * qz, 5.3, 2.7, L2);
+      this.box(14.2 * qx, (L2 - 0.2) / 2, 12.5 * qz, 0.3, L2 - 0.2, 0.3, m.dark, { tex: 1 });
+      // Level 3: stairs from that container up to the top of the double stack.
+      this.flight(19.7 * qx, 10.5 * qz, 'x', -qx, 7.4, 3, L2, L3);
     }
+    // Level 3 bridges: along each side between the double stacks, and one across the middle.
+    for (const s of [1, -1]) {
+      this.deck(11 * s, 0, 2.2, 11.8, L3);
+      this.box(5 * s, (L3 - 0.2) / 2, 0, 0.4, L3 - 0.2, 0.4, m.dark, { tex: 1 });
+    }
+    this.deck(0, 0, 19.8, 2.2, L3);
     for (const s of [1, -1]) { this.barrier(17 * s, 0, 0.6, 5); this.barrier(0, 15 * s, 4.5, 0.6); }
   }
 

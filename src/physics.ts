@@ -62,6 +62,15 @@ export class CollisionWorld {
     return false;
   }
 
+  /** Height of the highest surface under the point (x, z) that is at or below maxY. */
+  groundAt(x: number, z: number, maxY: number): number {
+    let g = 0;
+    for (const b of this.boxes) {
+      if (b.max.y > g && b.max.y <= maxY && x > b.min.x && x < b.max.x && z > b.min.z && z < b.max.z) g = b.max.y;
+    }
+    return g;
+  }
+
   /** Moves a box (centre c, half extents h) along one axis, resolving penetration. */
   moveAxis(c: Vector3, h: Vector3, axis: 0 | 1 | 2, amt: number): boolean {
     if (amt === 0) return false;

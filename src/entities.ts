@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { grenadeModel } from './gunModels';
 import type { AudioSys } from './audio';
 import type { Effects } from './effects';
 import type { CollisionWorld } from './physics';
@@ -7,7 +8,7 @@ import type { Player } from './player';
 export type ProjKind = 'bolt' | 'rocket' | 'grenade' | 'shell';
 
 interface Proj {
-  kind: ProjKind; mesh: THREE.Mesh; pos: THREE.Vector3; vel: THREE.Vector3;
+  kind: ProjKind; mesh: THREE.Object3D; pos: THREE.Vector3; vel: THREE.Vector3;
   dmg: number; life: number; active: boolean; trail: number;
 }
 
@@ -32,8 +33,6 @@ export class Projectiles {
     const boltMat = new THREE.MeshBasicMaterial(); boltMat.color.setRGB(5, 1.6, 0.3);
     const rocketGeo = new THREE.CylinderGeometry(0.09, 0.12, 0.6, 8); rocketGeo.rotateX(Math.PI / 2);
     const rocketMat = new THREE.MeshStandardMaterial({ color: 0x555a60, metalness: 0.8, roughness: 0.4, emissive: 0xff5a1a, emissiveIntensity: 1.2 });
-    const grenGeo = new THREE.SphereGeometry(0.075, 10, 8);
-    const grenMat = new THREE.MeshStandardMaterial({ color: 0x2c3a2c, metalness: 0.6, roughness: 0.5, emissive: 0x33ff66, emissiveIntensity: 0.9 });
     const make = (kind: ProjKind, n: number, geo: THREE.BufferGeometry, mat: THREE.Material) => {
       for (let i = 0; i < n; i++) {
         const mesh = new THREE.Mesh(geo, mat);
@@ -44,7 +43,15 @@ export class Projectiles {
     };
     make('bolt', 60, boltGeo, boltMat);
     make('rocket', 10, rocketGeo, rocketMat);
-    make('grenade', 8, grenGeo, grenMat);
+    // Thrown grenades use the same model as the one in hand, scaled up a little to read at range.
+    const nade = grenadeModel();
+    nade.scale.setScalar(1.8);
+    for (let i = 0; i < 8; i++) {
+      const mesh = nade.clone();
+      mesh.visible = false;
+      scene.add(mesh);
+      this.list.push({ kind: 'grenade', mesh, pos: new THREE.Vector3(), vel: new THREE.Vector3(), dmg: 0, life: 0, active: false, trail: 0 });
+    }
     const shellGeo = new THREE.CylinderGeometry(0.05, 0.05, 0.16, 8); shellGeo.rotateX(Math.PI / 2);
     make('shell', 12, shellGeo, new THREE.MeshStandardMaterial({ color: 0x3a3d33, metalness: 0.7, roughness: 0.4, emissive: 0xffb030, emissiveIntensity: 1.6 }));
   }
@@ -117,6 +124,7 @@ export class Projectiles {
       if (done) { p.active = false; p.mesh.visible = false; continue; }
       p.mesh.position.copy(p.pos);
       if (p.kind !== 'grenade') p.mesh.lookAt(tmp.copy(p.pos).add(p.vel));
+      else { const sp = Math.min(1, p.vel.length() / 8); p.mesh.rotation.x -= dt * 11 * sp; p.mesh.rotation.z += dt * 3 * sp; }
       p.trail -= dt;
       if (p.trail <= 0) {
         if (p.kind === 'rocket') { p.trail = 0.02; c.effects.trail(p.pos, 3, 1.2, 0.3, 0.3); if (Math.random() < 0.5) c.effects.puff(p.pos, 1, 0.4, 0.25); }
@@ -240,11 +248,16 @@ export class Pickups {
       part(g, can, olive, 0, 0, 0, true); part(g, lid, dark, 0, 0.14, 0); part(g, handle, dark, 0, 0.18, 0); part(g, stripe, yellow, 0, -0.02, 0);
       return g;
     };
-    const ball = new THREE.SphereGeometry(0.15, 12, 9), cap = new THREE.CylinderGeometry(0.05, 0.06, 0.1, 8), ringG = new THREE.CylinderGeometry(0.153, 0.153, 0.04, 14);
-    const grenGreen = std(0x2c3a2c, 0.6, 0.5), red = glow(3, 0.6, 0.3);
+    const ringG = new THREE.TorusGeometry(0.16, 0.012, 6, 24); ringG.rotateX(Math.PI / 2);
+    const red = glow(3, 0.6, 0.3);
+    const nadeModel = grenadeModel();
+    nadeModel.scale.setScalar(4);
+    nadeModel.position.y = -0.03;
     const grenade = () => {
       const g = new THREE.Group();
-      part(g, ball, grenGreen, 0, 0, 0, true); part(g, cap, dark, 0, 0.17, 0); part(g, ringG, red, 0, 0, 0);
+      g.add(nadeModel.clone());
+      // A glowing ring around the waist marks it as a pickup.
+      part(g, ringG, red, 0, -0.03, 0);
       return g;
     };
 

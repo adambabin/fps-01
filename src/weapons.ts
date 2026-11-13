@@ -6,7 +6,7 @@ import type { Input } from './input';
 import type { CollisionWorld } from './physics';
 import type { Player } from './player';
 import type { Settings } from './settings';
-import { buildGun, railGlow, type GunModel, type ReloadSpec } from './gunModels';
+import { buildGun, railGlow, throwArm, type GunModel, type ReloadSpec, type ThrowArm } from './gunModels';
 import { makeFlashTexture } from './textures';
 
 export interface WeaponDef {
@@ -70,9 +70,13 @@ export interface FireCtx {
   launch(pos: THREE.Vector3, vel: THREE.Vector3, dmg: number): void;
   /** Strikes robots in a short cone ahead. Returns true if anything was hit. */
   melee(dmg: number): boolean;
+  /** Releases a grenade from the player's hand, at the moment of the throw. */
+  throwGrenade(): void;
 }
 
-const MELEE_TIME = 0.5, MELEE_DAMAGE = 90;
+const MELEE_TIME = 0.5, MELEE_DAMAGE = 90, CUT_TIME = 0.12;
+/** Grenade throw: total time, and progress at which the pin comes out and the grenade leaves the hand. */
+const THROW_TIME = 0.62, THROW_PIN = 0.22, THROW_RELEASE = 0.5;
 
 type V3 = [number, number, number];
 const ZERO3: V3 = [0, 0, 0], DEFAULT_LIFT: V3 = [-0.07, 0.1, 0.03];
@@ -218,6 +222,9 @@ export class WeaponSystem {
   wantsFire = false;
   /** Counts down through a melee swing; the hit lands part-way through. */
   meleeT = 0;
+  /** Time left in a grenade throw; the gun is lowered while the throwing arm works. */
+  throwT = 0;
+  private arm: ThrowArm;
   private meleeDone = true;
   private adsHeld = false;
   private cooldown = 0;
@@ -245,6 +252,9 @@ export class WeaponSystem {
   private reloadRounds = 0;
   private reloadSteps: ReloadStep[] = [];
   private reloadPrevP = 0;
+  /** Last reload pose, eased out over CUT_TIME when a reload is cut short by firing. */
+  private lastPose: ReloadPose | null = null;
+  private cutT = 0;
 
   constructor(worldScene: THREE.Scene, env: THREE.Texture | null) {
     this.scene.environment = env;
@@ -264,6 +274,9 @@ export class WeaponSystem {
     this.flash = new THREE.Mesh(new THREE.PlaneGeometry(0.2, 0.2), fm);
     this.flash.visible = false;
     this.root.add(this.flash);
+    this.arm = throwArm();
+    this.arm.group.visible = false;
+    this.scene.add(this.arm.group);
     this.muzzleLight = new THREE.PointLight(0xffb060, 0, 16, 1.6);
     worldScene.add(this.muzzleLight);
     this.reset();
@@ -273,7 +286,7 @@ export class WeaponSystem {
     this.states = WEAPONS.map((w, i) => ({ ammo: w.mag, reserve: w.reserve, unlocked: i < 2 }));
     this.mods = { damage: 1, fireRate: 1, mag: 1, reload: 1, crit: 1, reserve: 1, melee: 1, handling: 1 }; this.boost = 1;
     this.current = 1; this.pending = -1; this.switchT = 0;
-    this.reloadT = 0; this.cooldown = 0; this.heat = 0; this.ads = 0; this.adsHeld = false; this.meleeT = 0;
+    this.reloadT = 0; this.cooldown = 0; this.heat = 0; this.ads = 0; this.adsHeld = false; this.meleeT = 0; this.throwT = 0;
     this.grenades = this.maxGrenades = 2;
     this.guns.forEach((g, i) => (g.group.visible = i === this.current));
   }
@@ -385,7 +398,20 @@ export class WeaponSystem {
         if (c.melee(MELEE_DAMAGE * this.mods.melee)) { c.audio.meleeHit(); player.shake = Math.min(1, player.shake + 0.25); }
       }
     }
-    const busy = this.switchT > 0 || this.meleeT > 0;
+    // Grenade: lower the gun, pull the pin, throw. Works while sprinting; interrupts a reload.
+    if (input.wasPressed('grenade') && this.throwT <= 0 && this.meleeT <= 0 && this.switchT <= 0 && this.grenades > 0) {
+      this.grenades--;
+      this.throwT = THROW_TIME; this.reloadT = 0; this.reloadSteps = [];
+    }
+    if (this.throwT > 0) {
+      const before = 1 - this.throwT / THROW_TIME;
+      this.throwT = Math.max(0, this.throwT - dt);
+      const p = 1 - this.throwT / THROW_TIME;
+      if (before < THROW_PIN && p >= THROW_PIN) c.audio.reloadStep('grab');
+      if (before < THROW_RELEASE - 0.06 && p >= THROW_RELEASE - 0.06) c.audio.swing();
+      if (before < THROW_RELEASE && p >= THROW_RELEASE) c.throwGrenade();
+    }
+    const busy = this.switchT > 0 || this.meleeT > 0 || this.throwT > 0;
 
     // Aim
     if (settings.adsToggle) { if (input.wasPressed('ads')) this.adsHeld = !this.adsHeld; }
@@ -421,6 +447,9 @@ export class WeaponSystem {
     const trigger = def.auto ? input.isDown('fire') : this.fireBuf > 0;
     this.wantsFire = trigger || input.isDown('fire');
     this.sprintT += ((player.sprinting ? 1 : 0) - this.sprintT) * Math.min(1, dt * 10);
+    // A shotgun loading shells one at a time can be fired mid-reload if a shell is chambered.
+    const canCut = this.reloading && st.ammo > 0 && this.guns[this.current].reload.style === 'shells' && input.wasPressed('fire');
+    if (canCut) { this.reloadT = 0; this.reloadSteps = []; this.cutT = CUT_TIME; }
     if (trigger && !busy && !this.reloading && this.cooldown <= 0 && this.sprintT < 0.5) {
       if (st.ammo > 0) {
         this.fireBuf = 0;
@@ -543,7 +572,14 @@ export class WeaponSystem {
     x -= s * 0.05; y -= s * 0.06; ry += s * 0.55; rx -= s * 0.22;
 
     // Reload: tilt the gun towards the support hand while it works (see reloadPose).
-    const rp = this.reloadT > 0 ? reloadPose(gun.reload, 1 - this.reloadT / this.reloadDur, this.reloadEmpty, this.reloadRounds, this.reloadDur) : null;
+    let rp = this.reloadT > 0 ? reloadPose(gun.reload, 1 - this.reloadT / this.reloadDur, this.reloadEmpty, this.reloadRounds, this.reloadDur) : null;
+    if (rp) { this.lastPose = rp; this.cutT = 0; }
+    else if (this.cutT > 0 && this.lastPose) {
+      // Ease back from wherever the cut-short reload was.
+      this.cutT = Math.max(0, this.cutT - dt);
+      const k = this.cutT / CUT_TIME, lp = this.lastPose, sc = (v: V3): V3 => [v[0] * k, v[1] * k, v[2] * k];
+      rp = { ...lp, gun: sc(lp.gun), gunRot: [lp.gunRot[0] * k, lp.gunRot[1] * k], hand: sc(lp.hand), mag: ZERO3, magRot: [0, 0], held: false, slideBack: 0, pull: 0 };
+    }
     if (rp) { x += rp.gun[0]; y += rp.gun[1]; z += rp.gun[2]; rx += rp.gunRot[0]; rz += rp.gunRot[1]; }
     // Melee: swing the weapon across and forward, then recover.
     if (this.meleeT > 0) {
@@ -551,6 +587,13 @@ export class WeaponSystem {
       const env = p < 0.26 ? p / 0.26 : 1 - (p - 0.26) / 0.74, m = env * env * (3 - 2 * env);
       x -= m * 0.08; y += m * 0.03; z -= m * 0.15; ry += m * 0.8; rz -= m * 0.5; rx += m * 0.12;
     }
+    // Grenade throw: the gun drops out of the way while the arm throws.
+    const th = this.throwT > 0 ? 1 - this.throwT / THROW_TIME : -1;
+    if (th >= 0) {
+      const d = ss(th, 0, 0.16) * (1 - ss(th, 0.7, 0.98));
+      y -= d * 0.32; rx -= d * 0.55; x += d * 0.04;
+    }
+    this.poseArm(th);
     // Swap: drop below the frame and come back.
     if (this.switchT > 0) {
       const p = Math.abs(this.switchT - 0.18) / 0.18;
@@ -584,10 +627,29 @@ export class WeaponSystem {
     }
   }
 
-  /** Takes one grenade if available. */
-  useGrenade(): boolean {
-    if (this.grenades <= 0) return false;
-    this.grenades--;
-    return true;
+  /** Places the throwing arm for throw progress p (hidden when p < 0). */
+  private poseArm(p: number) {
+    const a = this.arm;
+    a.group.visible = p >= 0 && p < 0.8;
+    if (!a.group.visible) return;
+    // Rise into view, pin out, wind back, throw forward, follow through out of frame.
+    let pos: V3 = [0.3, -0.5, -0.3], rot: V3 = [0.2, 0, 0];
+    pos = toward(pos, [0.1, -0.12, -0.34], ss(p, 0, 0.2));
+    rot = toward(rot, [0.1, -0.2, 0.1], ss(p, 0, 0.2));
+    pos = toward(pos, [0.16, -0.02, -0.27], ss(p, 0.3, 0.45));
+    rot = toward(rot, [-0.6, -0.1, -0.35], ss(p, 0.3, 0.45));
+    pos = toward(pos, [0.03, -0.03, -0.58], ss(p, 0.45, THROW_RELEASE + 0.03));
+    rot = toward(rot, [0.7, 0.1, 0.1], ss(p, 0.45, THROW_RELEASE + 0.03));
+    pos = toward(pos, [-0.04, -0.5, -0.48], ss(p, THROW_RELEASE + 0.05, 0.78));
+    rot = toward(rot, [1.2, 0.2, 0.3], ss(p, THROW_RELEASE + 0.05, 0.78));
+    a.group.position.set(...pos);
+    a.group.rotation.set(...rot);
+    a.nade.visible = p < THROW_RELEASE;
+    // The pin and ring come away and drop out of view.
+    const pull = ss(p, THROW_PIN - 0.04, THROW_PIN + 0.1);
+    a.pin.position.set(-0.07 * pull, -0.05 * pull * pull, 0.02 * pull);
+    a.pin.rotation.set(0, 0, 1.5 * pull);
+    a.pin.visible = p < THROW_PIN + 0.1;
   }
+
 }

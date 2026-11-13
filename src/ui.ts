@@ -143,6 +143,8 @@ export class UI {
     const check = (label: string, key: 'invertY' | 'adsToggle' | 'scrollSwitch' | 'rawInput' | 'showFps' | 'damageNumbers') => {
       const r = row(label), i = document.createElement('input');
       i.type = 'checkbox'; i.checked = s[key];
+      // Link the text to the box so clicking anywhere on the label toggles it.
+      i.id = 'opt-' + key; (r.firstChild as HTMLLabelElement).htmlFor = i.id; r.classList.add('toggle');
       i.addEventListener('change', () => { s[key] = i.checked; this.commit(); });
       r.append(i);
     };
@@ -297,6 +299,9 @@ export class UI {
     d.addEventListener('animationend', () => d.remove());
     el.append(d);
   }
+
+  /** Hides the current announcement at once. */
+  clearAnnounce() { $('announce').style.opacity = '0'; this.announceT = 0; }
 
   announce(main: string, sub = '', time = 2.4) {
     $('announce-main').textContent = main; $('announce-sub').textContent = sub;

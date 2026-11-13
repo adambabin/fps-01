@@ -110,8 +110,8 @@ export class Player {
     this.crouchT += ((this.crouching ? 1 : 0) - this.crouchT) * Math.min(1, dt * 12);
 
     // Wish direction
-    const f = (input.isDown('forward') ? 1 : 0) - (input.isDown('back') ? 1 : 0);
-    const r = (input.isDown('right') ? 1 : 0) - (input.isDown('left') ? 1 : 0);
+    const f = Math.max(-1, Math.min(1, (input.isDown('forward') ? 1 : 0) - (input.isDown('back') ? 1 : 0) + input.moveY));
+    const r = Math.max(-1, Math.min(1, (input.isDown('right') ? 1 : 0) - (input.isDown('left') ? 1 : 0) + input.moveX));
     const sy = Math.sin(this.yaw), cy = Math.cos(this.yaw);
     let wx = -sy * f + cy * r, wz = -cy * f - sy * r;
     const wl = Math.hypot(wx, wz);
@@ -135,6 +135,8 @@ export class Player {
     let speed = this.crouching ? CROUCH_SPEED : this.sprinting ? SPRINT : WALK;
     if (ads > 0.5) speed = Math.min(speed, ADS_SPEED);
     speed *= this.speedMult;
+    // A touch stick pushed part-way walks slower; keys always give full speed.
+    if (wl > 0) speed *= Math.min(1, Math.hypot(f, r));
 
     if (this.sliding) {
       // handled above

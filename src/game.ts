@@ -13,6 +13,7 @@ import { Input } from './input';
 import { FlowField } from './nav';
 import { Objectives, type KillSource } from './objectives';
 import { Player } from './player';
+import { TouchControls, isTouchDevice } from './touch';
 import { DIFFICULTY, loadHighScore, loadSettings, saveHighScore, saveScore, type Settings } from './settings';
 import { UI, type Card, type RadarBlip } from './ui';
 import { WEAPONS, WeaponSystem, type FireCtx } from './weapons';
@@ -106,6 +107,8 @@ export class Game {
   private fireCtx: FireCtx;
   /** Automated-test mode: runs without pointer lock. */
   private test = new URLSearchParams(location.search).has('test');
+  /** Phones and tablets: no pointer lock, on-screen controls instead. */
+  private touch: TouchControls | null = null;
 
   constructor(private canvas: HTMLCanvasElement) {
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: false, powerPreference: 'high-performance' });
@@ -161,6 +164,11 @@ export class Game {
       melee: (dmg) => this.melee(dmg),
     };
 
+    if (isTouchDevice()) {
+      this.touch = new TouchControls(this.input);
+      document.querySelector('#menu .hint')!.textContent = 'Left thumb: move (push to the rim to sprint) · Right thumb: drag to look · Hold FIRE and drag to shoot while aiming · AIM toggles sights · Play in landscape';
+      document.querySelector('#upgrade .hint')!.textContent = 'Tap a card';
+    }
     this.input.lookActive = () => this.state === 'playing' && this.locked();
     document.addEventListener('pointerlockchange', () => {
       if (!this.locked() && this.state === 'playing') this.pause();
@@ -180,9 +188,12 @@ export class Game {
   }
 
   // ---------- setup ----------
-  private locked(): boolean { return this.test || document.pointerLockElement === this.canvas; }
+  /** Whether input is captured. Touch devices have no pointer lock and are always engaged. */
+  private locked(): boolean { return this.test || !!this.touch || document.pointerLockElement === this.canvas; }
 
+  /** Captures the mouse, or on touch devices brings up the on-screen controls instead. */
   private requestLock() {
+    if (this.touch) { this.touch.show(true); return; }
     if (this.test) return;
     const fail = () => { if (this.state === 'playing' && !this.locked()) this.pause(); };
     try {
@@ -297,6 +308,7 @@ export class Game {
     if (this.state !== 'playing') return;
     this.state = 'paused';
     this.input.reset();
+    this.touch?.show(false);
     if (document.pointerLockElement) document.exitPointerLock();
     this.ui.show('pause');
   }
@@ -310,6 +322,7 @@ export class Game {
 
   private toMenu() {
     this.state = 'menu';
+    this.touch?.show(false);
     this.objectives.clear(); this.ui.objective(null, null);
     this.syncArena(); this.audio.setWeather(this.world.weather);
     this.enemies.clear(); this.projectiles.clear(); this.pickups.clear(); this.effects.clear(); this.shockwaves.clear(); this.boss = null;
@@ -407,6 +420,7 @@ export class Game {
     this.offers = offers;
     this.state = 'upgrade';
     this.input.reset();
+    this.touch?.show(false);
     if (document.pointerLockElement) document.exitPointerLock();
     this.ui.showUpgrades(this.wave, offers as Card[]);
   }
@@ -428,6 +442,7 @@ export class Game {
   private gameOver() {
     this.state = 'dead';
     this.deadT = 0;
+    this.touch?.show(false);
     this.weapons.scene.visible = false;
     if (document.pointerLockElement) document.exitPointerLock();
     const best = loadHighScore();

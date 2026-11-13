@@ -163,3 +163,35 @@ button.primary:hover { background: #8be4ff; }
 #waypoint.prime { color: #ffc23a; }
 #waypoint.prime i { border-color: #ffc23a; box-shadow: 0 0 6px rgba(255, 194, 58, 0.7); }
 #fps { position: absolute; left: 26px; top: 290px; font-size: 12px; color: var(--dim); font-variant-numeric: tabular-nums; }
+
+/* ---------- touch controls ---------- */
+body.touch { touch-action: manipulation; -webkit-touch-callout: none; -webkit-tap-highlight-color: transparent; }
+#touch { position: fixed; inset: 0; z-index: 15; touch-action: none; --sl: env(safe-area-inset-left, 0px); --sr: env(safe-area-inset-right, 0px); --sb: env(safe-area-inset-bottom, 0px); }
+#touch .look-area { position: absolute; inset: 0; }
+#touch .stick { position: absolute; width: 124px; height: 124px; margin: -62px 0 0 -62px; border-radius: 50%; border: 2px solid rgba(232, 238, 244, 0.28); background: rgba(10, 14, 19, 0.25); opacity: 0; pointer-events: none; }
+#touch .stick.active { opacity: 1; }
+#touch .knob { position: absolute; left: 50%; top: 50%; width: 52px; height: 52px; margin: -26px 0 0 -26px; border-radius: 50%; background: rgba(232, 238, 244, 0.45); }
+.tbtn { position: absolute; display: flex; align-items: center; justify-content: center; width: 58px; height: 58px; border-radius: 50%; background: rgba(10, 14, 19, 0.42); border: 1px solid rgba(232, 238, 244, 0.32); color: rgba(232, 238, 244, 0.9); font-size: 10px; font-weight: 700; letter-spacing: 0.08em; text-shadow: 0 1px 2px #000; }
+.tbtn.on { background: rgba(88, 214, 255, 0.4); border-color: var(--cyan); }
+.tbtn.fire { width: 86px; height: 86px; right: calc(26px + var(--sr)); bottom: calc(30px + var(--sb)); font-size: 13px; border-color: rgba(255, 143, 61, 0.7); }
+.tbtn.fire.on { background: rgba(255, 143, 61, 0.45); }
+.tbtn.ads { right: calc(122px + var(--sr)); bottom: calc(96px + var(--sb)); }
+.tbtn.jump { right: calc(126px + var(--sr)); bottom: calc(22px + var(--sb)); }
+.tbtn.crouch { right: calc(196px + var(--sr)); bottom: calc(14px + var(--sb)); }
+.tbtn.reload { right: calc(40px + var(--sr)); bottom: calc(132px + var(--sb)); }
+.tbtn.grenade { right: calc(108px + var(--sr)); bottom: calc(168px + var(--sb)); width: 48px; height: 48px; }
+.tbtn.melee { right: calc(30px + var(--sr)); bottom: calc(206px + var(--sb)); width: 48px; height: 48px; }
+.tbtn.swap { right: calc(176px + var(--sr)); bottom: calc(84px + var(--sb)); width: 48px; height: 48px; }
+.tbtn.pause { top: calc(10px + env(safe-area-inset-top, 0px)); left: 50%; margin-left: -150px; width: 40px; height: 40px; font-size: 12px; }
+
+/* Make room for the controls: the weapon panel moves to the bottom centre and the HUD shrinks. */
+body.touch #weapon { right: auto; left: 50%; bottom: calc(8px + env(safe-area-inset-bottom, 0px)); transform: translateX(-50%) scale(0.6); transform-origin: bottom center; text-align: center; }
+body.touch #weapon #reload-bar { margin-left: auto; margin-right: auto; }
+body.touch #slots { justify-content: center; }
+body.touch #radar { width: 96px; height: 96px; left: calc(12px + env(safe-area-inset-left, 0px)); top: 12px; }
+body.touch #objective { top: 118px; left: calc(12px + env(safe-area-inset-left, 0px)); width: 190px; }
+body.touch #vitals { left: calc(16px + env(safe-area-inset-left, 0px)); bottom: calc(12px + env(safe-area-inset-bottom, 0px)); transform: scale(0.8); transform-origin: bottom left; }
+body.touch #score-box { top: 10px; right: calc(16px + env(safe-area-inset-right, 0px)); transform: scale(0.8); transform-origin: top right; }
+body.touch #feed { top: 70px; right: calc(16px + env(safe-area-inset-right, 0px)); font-size: 11px; }
+body.touch #top { top: 10px; transform: translateX(-50%) scale(0.85); transform-origin: top center; }
+body.touch #announce-main { font-size: 30px; }

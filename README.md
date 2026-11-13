@@ -1,4 +1,4 @@
-# RUSTWAKE
+# Clanker Survival
 
 A browser-based single-player wave-survival FPS. Fight escalating waves of robots in an
 industrial facility, pick an upgrade after every wave, and see how far you get.

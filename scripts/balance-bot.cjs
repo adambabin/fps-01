@@ -64,6 +64,12 @@ const { chromium } = require('playwright');
             gT -= dt;
             if (gT <= 0 && w.grenades > 0 && dist > 7 && dist < 18 && g.enemies.list.filter((e) => e.pos.distanceTo(target.pos) < 5).length >= 3) { inp.pressed.add('KeyG'); gT = 6; }
           } else if (w.state.ammo < w.magSize()) inp.pressed.add('KeyR');
+          // Hop over the boss's ground pulse, with human-ish timing.
+          for (const sw of g.shockwaves.list) {
+            if (!sw.active) continue;
+            const d = Math.hypot(pl.pos.x - sw.mesh.position.x, pl.pos.z - sw.mesh.position.z);
+            if (d - sw.r > 0.8 && d - sw.r < 2.6 && Math.random() < 0.8 * skill) inp.pressed.add('Space');
+          }
           g.simulate(dt); inp.endFrame();
           if (pl.health < lastHp) dmgTaken += lastHp - pl.health; lastHp = pl.health;
         }

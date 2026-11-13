@@ -7,14 +7,14 @@ import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPa
 import { AudioSys } from './audio';
 import { Effects } from './effects';
 import { ENEMY_DEFS, EnemyManager, type Enemy, type EnemyCtx, type EnemyType } from './enemies';
-import { PICKUP_AMMO, PICKUP_ARMOR, PICKUP_GRENADE, PICKUP_HEALTH, Pickups, Projectiles, type ProjCtx } from './entities';
+import { PICKUP_AMMO, PICKUP_ARMOR, PICKUP_GRENADE, PICKUP_HEALTH, Pickups, Projectiles, Shockwaves, type ProjCtx } from './entities';
 import { Input } from './input';
 import { FlowField } from './nav';
 import { Player } from './player';
 import { DIFFICULTY, loadHighScore, loadSettings, saveHighScore, type Settings } from './settings';
 import { UI, type Card, type RadarBlip } from './ui';
 import { WEAPONS, WeaponSystem, type FireCtx } from './weapons';
-import { World } from './world';
+import { ARENAS, CEIL, World } from './world';
 
 type State = 'menu' | 'playing' | 'paused' | 'upgrade' | 'dead';
 
@@ -66,6 +66,9 @@ export class Game {
   enemies: EnemyManager;
   projectiles: Projectiles;
   pickups: Pickups;
+  shockwaves: Shockwaves;
+  /** The Warden while it is alive, for the boss health bar. */
+  private boss: Enemy | null = null;
   ui: UI;
   state: State = 'menu';
   wave = 0;
@@ -100,6 +103,7 @@ export class Game {
     this.renderer.shadowMap.enabled = true;
 
     this.world = new World(this.scene, this.renderer);
+    this.world.load(this.settings.arena in ARENAS ? this.settings.arena : 'reactor');
     this.nav = new FlowField(this.world.collision);
     this.effects = new Effects(this.scene);
     this.player = new Player(this.world.collision, this.audio);
@@ -107,6 +111,7 @@ export class Game {
     this.enemies = new EnemyManager(this.scene);
     this.projectiles = new Projectiles(this.scene);
     this.pickups = new Pickups(this.scene);
+    this.shockwaves = new Shockwaves(this.scene);
     // Faint light carried by the player so nearby surfaces never go fully black.
     this.camera.add(new THREE.PointLight(0xcfe0ff, 5, 13, 1.5));
     this.scene.add(this.camera);
@@ -127,6 +132,8 @@ export class Game {
       ...shared, nav: this.nav, projectiles: this.projectiles, shotSpeed: 1, slots: 2, shared: { droneCd: 0, engaged: 0 },
       hurtPlayer: (a, from) => this.hurtPlayer(a, from),
       onKill: (e, crit) => this.onKill(e, crit),
+      shockwave: (at, dmg) => { this.shockwaves.spawn(at.x, at.z, dmg); this.audio.explosion(tmpC.set(at.x, 0, at.z), true); this.effects.explosion(tmpC, 1.5); },
+      summon: (type, count) => { for (let i = 0; i < count; i++) this.spawn(type); this.ui.announce('REINFORCEMENTS', '', 1.4); },
     };
     this.projCtx = {
       ...shared,
@@ -137,6 +144,7 @@ export class Game {
     this.fireCtx = {
       world: this.world.collision, enemies: this.enemies, effects: this.effects, audio: this.audio, camera: this.camera,
       hitEnemy: (e, dmg, crit, point, dir) => this.hitEnemy(e, dmg, crit, point, dir),
+      launch: (pos, vel, dmg) => this.projectiles.spawn('shell', pos, vel, dmg),
     };
 
     this.input.lookActive = () => this.state === 'playing' && this.locked();
@@ -202,6 +210,8 @@ export class Game {
   private applySettings() {
     this.audio.setVolume(this.settings.volume);
     this.applyDifficulty();
+    // The arena can only change between runs; the menu shows the selection immediately.
+    if (this.state === 'menu') this.syncArena();
     this.buildComposer();
     this.resize();
   }
@@ -225,10 +235,19 @@ export class Game {
   }
 
   // ---------- flow ----------
+  /** Loads the arena chosen in settings if it is not the one on screen. */
+  private syncArena() {
+    if (this.world.current === this.settings.arena) return;
+    this.enemies.clear(); this.projectiles.clear(); this.pickups.clear(); this.effects.clear(); this.shockwaves.clear(); this.boss = null;
+    this.world.load(this.settings.arena);
+    this.nav.rebuild(this.world.collision);
+  }
+
   startRun() {
     this.audio.unlock();
+    this.syncArena();
     this.audio.startAmbient();
-    this.enemies.clear(); this.projectiles.clear(); this.pickups.clear(); this.effects.clear();
+    this.enemies.clear(); this.projectiles.clear(); this.pickups.clear(); this.effects.clear(); this.shockwaves.clear(); this.boss = null;
     this.player.reset(); this.weapons.reset();
     this.applyDifficulty();
     this.wave = 0; this.score = 0; this.kills = 0; this.lifesteal = 0; this.runTime = 0;
@@ -258,7 +277,7 @@ export class Game {
 
   private toMenu() {
     this.state = 'menu';
-    this.enemies.clear(); this.projectiles.clear(); this.pickups.clear(); this.effects.clear();
+    this.enemies.clear(); this.projectiles.clear(); this.pickups.clear(); this.effects.clear(); this.shockwaves.clear(); this.boss = null;
     this.weapons.scene.visible = false;
     this.ui.showHud(false); this.ui.show('menu');
     this.ui.setBest(loadHighScore());
@@ -267,11 +286,11 @@ export class Game {
   private nextWave() {
     this.wave++;
     this.applyDifficulty();
-    const w = this.wave;
-    let budget = Math.round((3 + w * 2.6 + w * w * 0.14) * this.diff.budget);
-    const q: EnemyType[] = [];
-    let heavies = Math.floor(w / 4);
-    if (w % 5 === 0) heavies++;
+    const w = this.wave, bossWave = w % 5 === 0;
+    // Boss waves bring the Warden with a smaller escort.
+    let budget = Math.round((3 + w * 2.6 + w * w * 0.14) * this.diff.budget * (bossWave ? 0.4 : 1));
+    const q: EnemyType[] = bossWave ? ['boss'] : [];
+    let heavies = bossWave ? 0 : Math.floor(w / 4);
     while (budget > 0) {
       const opts: [EnemyType, number][] = [['scuttler', 4], ['trooper', w >= 2 ? 3.5 : 1.5]];
       if (w >= 2) opts.push(['drone', 2.2]);
@@ -284,14 +303,18 @@ export class Game {
     }
     this.queue = q;
     this.spawnT = 1;
-    this.ui.announce('WAVE ' + w, `${q.length} HOSTILES`);
-    this.audio.waveStart();
+    if (bossWave) { this.ui.announce('WARNING', 'WARDEN INBOUND', 3); this.audio.alarm(); }
+    else { this.ui.announce('WAVE ' + w, `${q.length} HOSTILES`); this.audio.waveStart(); }
   }
 
-  private spawnNext() {
-    const type = this.queue.shift()!;
+  private spawn(type: EnemyType) {
     const hp = (1 + 0.06 * (this.wave - 1)) * this.diff.hp, dmg = (1 + 0.03 * (this.wave - 1)) * this.diff.dmg;
-    if (type === 'drone') {
+    if (type === 'boss') {
+      // Each return of the Warden is tougher than the last.
+      const n = Math.max(1, Math.floor(this.wave / 5));
+      this.boss = this.enemies.spawn(type, tmpA.set(0, CEIL - 2.6, -16), (0.6 + 0.4 * n) * this.diff.hp, dmg);
+      this.effects.explosion(tmpA, 1.2, 0.6, 2, 3.5);
+    } else if (type === 'drone') {
       const v = this.world.vents[(Math.random() * this.world.vents.length) | 0];
       this.enemies.spawn(type, tmpA.copy(v).add(tmpB.set(Math.random() - 0.5, 0, Math.random() - 0.5)), hp, dmg);
       this.effects.sparks(v, tmpB.set(0, -1, 0), 6, 0.6, 2, 3);
@@ -316,16 +339,12 @@ export class Game {
 
   private offerUpgrades() {
     const offers: Upgrade[] = [];
-    // Weapon unlocks are offered first until taken.
-    for (const i of [2, 3]) {
-      if (!this.weapons.states[i].unlocked && this.wave >= (i === 2 ? 1 : 3) && offers.length < 1) {
-        const w = WEAPONS[i];
-        offers.push({
-          name: w.name, weapon: true,
-          desc: i === 2 ? 'Unlock the pump shotgun. Ten pellets a shell; devastating up close.' : 'Unlock the railgun. Huge damage that punches through every robot in line.',
-          apply: (g) => g.weapons.unlock(i),
-        });
-      }
+    // One weapon unlock is offered each wave until all are taken, earliest first.
+    const locked = WEAPONS.map((w, i) => ({ w, i })).filter((o) => o.w.unlockWave !== undefined && !this.weapons.states[o.i].unlocked && this.wave >= o.w.unlockWave!)
+      .sort((x, y) => x.w.unlockWave! - y.w.unlockWave!);
+    if (locked.length) {
+      const { w, i } = locked[0];
+      offers.push({ name: w.name, weapon: true, desc: w.pitch ?? '', apply: (g) => g.weapons.unlock(i) });
     }
     const pool = UPGRADES.filter((u) => !u.ok || u.ok(this));
     while (offers.length < 3 && pool.length) offers.push(pool.splice((Math.random() * pool.length) | 0, 1)[0]);
@@ -394,7 +413,8 @@ export class Game {
     if (this.lifesteal) this.player.health = Math.min(this.player.maxHealth, this.player.health + this.lifesteal);
     const p = e.center(tmpC).clone();
     p.y = 0.5;
-    const drops = e.type === 'heavy' ? 3 : 1;
+    if (e.type === 'boss') { this.boss = null; this.ui.announce('WARDEN DESTROYED', `+${pts}`, 2.5); }
+    const drops = e.type === 'boss' ? 7 : e.type === 'heavy' ? 3 : 1;
     for (let i = 0; i < drops; i++) {
       const r = Math.random(), hurt = this.player.health < this.player.maxHealth * 0.5;
       const k = this.diff.drops, hp = (hurt ? 0.2 : 0.09) * k;
@@ -403,7 +423,7 @@ export class Game {
       else if (r < hp + 0.17 * k) kind = PICKUP_AMMO;
       else if (r < hp + 0.23 * k) kind = PICKUP_ARMOR;
       else if (r < hp + 0.27 * k) kind = PICKUP_GRENADE;
-      else if (e.type === 'heavy') kind = i === 0 ? PICKUP_HEALTH : PICKUP_AMMO;
+      else if (e.type === 'heavy' || e.type === 'boss') kind = i % 3 === 0 ? PICKUP_HEALTH : i % 3 === 1 ? PICKUP_AMMO : PICKUP_ARMOR;
       if (kind >= 0) this.pickups.spawn(kind, tmpA.set(p.x + (Math.random() - 0.5) * drops, 0.5, p.z + (Math.random() - 0.5) * drops));
     }
   }
@@ -503,6 +523,7 @@ export class Game {
     this.enemies.update(dt, this.enemyCtx);
     this.projectiles.update(dt, this.projCtx);
     this.pickups.update(dt, p, (k) => this.collect(k));
+    this.shockwaves.update(dt, p, (a, from) => this.hurtPlayer(a, from));
     this.effects.update(dt);
     if (this.state !== 'playing') return;
 
@@ -516,7 +537,7 @@ export class Game {
     } else if (this.queue.length) {
       this.spawnT -= dt;
       const cap = Math.min(22, 9 + this.wave);
-      if (this.spawnT <= 0 && this.enemies.list.length < cap) { this.spawnNext(); this.spawnT = Math.max(0.3, 1.1 - this.wave * 0.06); }
+      if (this.spawnT <= 0 && this.enemies.list.length < cap) { this.spawn(this.queue.shift()!); this.spawnT = Math.max(0.3, 1.1 - this.wave * 0.06); }
     } else if (this.enemies.list.length === 0 && this.wave > 0) this.waveCleared();
 
     // HUD
@@ -533,11 +554,12 @@ export class Game {
       health: p.health, maxHealth: p.maxHealth, armor: p.armor, maxArmor: p.maxArmor, wave: Math.max(1, this.wave),
       remaining: this.enemies.list.length + this.queue.length, score: this.score, weapons: w, spreadPx, ads: w.ads,
       sprinting: p.sprinting, fps: this.fps, intermission: this.intermission,
+      boss: this.boss && this.boss.alive ? this.boss.hp / this.boss.maxHp : -1,
     });
     const sy = Math.sin(p.yaw), cy = Math.cos(p.yaw), blips: RadarBlip[] = [];
     for (const en of this.enemies.list) {
       const dx = en.pos.x - p.pos.x, dz = en.pos.z - p.pos.z;
-      blips.push({ x: dx * cy - dz * sy, z: -dx * sy - dz * cy, kind: en.type === 'heavy' ? 3 : en.type === 'drone' ? 2 : 1 });
+      blips.push({ x: dx * cy - dz * sy, z: -dx * sy - dz * cy, kind: en.type === 'heavy' || en.type === 'boss' ? 3 : en.type === 'drone' ? 2 : 1 });
     }
     this.ui.drawRadar(blips);
   }

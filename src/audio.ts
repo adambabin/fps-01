@@ -1,6 +1,6 @@
 import { Vector3 } from 'three';
 
-export type ShotKind = 'pistol' | 'rifle' | 'shotgun' | 'rail';
+export type ShotKind = 'pistol' | 'rifle' | 'shotgun' | 'rail' | 'smg' | 'launcher';
 
 interface NoiseOpts { gain: number; dur: number; freq: number; freqEnd?: number; q?: number; type?: BiquadFilterType; pan?: number; delay?: number; attack?: number; }
 interface ToneOpts { gain: number; dur: number; freq: number; freqEnd?: number; type?: OscillatorType; pan?: number; delay?: number; attack?: number; }
@@ -98,6 +98,13 @@ export class AudioSys {
       this.noise({ gain: 0.5, dur: 0.11, freq: 6500, freqEnd: 900 });
       this.noise({ gain: 0.25, dur: 0.22, freq: 1400, freqEnd: 300, type: 'bandpass' });
       this.tone({ gain: 0.45, dur: 0.09, freq: 170, freqEnd: 55, type: 'triangle' });
+    } else if (kind === 'smg') {
+      this.noise({ gain: 0.4, dur: 0.07, freq: 7800, freqEnd: 1400 });
+      this.tone({ gain: 0.3, dur: 0.06, freq: 240, freqEnd: 90, type: 'triangle' });
+    } else if (kind === 'launcher') {
+      this.tone({ gain: 0.9, dur: 0.22, freq: 190, freqEnd: 48 });
+      this.noise({ gain: 0.45, dur: 0.16, freq: 1300, freqEnd: 220 });
+      this.noise({ gain: 0.2, dur: 0.05, freq: 2600, type: 'bandpass', q: 5, delay: 0.3 });
     } else if (kind === 'shotgun') {
       this.noise({ gain: 0.9, dur: 0.3, freq: 3800, freqEnd: 260 });
       this.tone({ gain: 0.8, dur: 0.22, freq: 130, freqEnd: 38 });
@@ -150,6 +157,19 @@ export class AudioSys {
     const s = this.spatial(pos), k = (big ? 1.2 : 0.6) * Math.max(0.15, s.g * 2);
     this.noise({ gain: Math.min(1.2, k), dur: big ? 0.9 : 0.45, freq: 2600, freqEnd: 90, pan: s.pan });
     this.tone({ gain: Math.min(1.1, k), dur: big ? 0.6 : 0.3, freq: 110, freqEnd: 26, pan: s.pan });
+  }
+
+  /** Rising whine while the boss charges its ground pulse. */
+  charge(pos: Vector3) {
+    const s = this.spatial(pos), g = Math.max(0.25, s.g * 2);
+    this.tone({ gain: 0.45 * g, dur: 1.2, freq: 110, freqEnd: 880, type: 'sawtooth', pan: s.pan, attack: 0.3 });
+    this.tone({ gain: 0.3 * g, dur: 1.2, freq: 164, freqEnd: 1320, type: 'square', pan: s.pan, attack: 0.5 });
+  }
+  alarm() {
+    for (let i = 0; i < 3; i++) {
+      this.tone({ gain: 0.32, dur: 0.38, freq: 520, freqEnd: 300, type: 'sawtooth', delay: i * 0.55, attack: 0.04 });
+      this.tone({ gain: 0.2, dur: 0.38, freq: 780, freqEnd: 450, type: 'square', delay: i * 0.55, attack: 0.04 });
+    }
   }
 
   robotDeath(pos: Vector3) {

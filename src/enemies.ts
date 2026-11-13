@@ -8,7 +8,7 @@ import type { Player } from './player';
 import { createRobot } from './robotModels';
 import { ARENA, CEIL } from './world';
 
-export type EnemyType = 'scuttler' | 'trooper' | 'drone' | 'heavy';
+export type EnemyType = 'scuttler' | 'trooper' | 'drone' | 'heavy' | 'boss';
 
 interface Def { hp: number; speed: number; radius: number; height: number; score: number; cost: number; name: string; }
 export const ENEMY_DEFS: Record<EnemyType, Def> = {
@@ -16,6 +16,7 @@ export const ENEMY_DEFS: Record<EnemyType, Def> = {
   trooper: { hp: 95, speed: 3.3, radius: 0.45, height: 1.9, score: 100, cost: 2, name: 'Trooper' },
   drone: { hp: 38, speed: 5.5, radius: 0.5, height: 0.6, score: 75, cost: 2, name: 'Drone' },
   heavy: { hp: 700, speed: 1.9, radius: 1.0, height: 3.1, score: 400, cost: 7, name: 'Juggernaut' },
+  boss: { hp: 3200, speed: 3.4, radius: 2.0, height: 2.4, score: 2500, cost: 0, name: 'Warden' },
 };
 
 interface HitSphere { x: number; y: number; z: number; r: number; crit: boolean; }
@@ -23,6 +24,7 @@ const SPHERES: Record<EnemyType, HitSphere[]> = {
   scuttler: [{ x: 0, y: 0.5, z: 0, r: 0.58, crit: false }, { x: 0, y: 0.52, z: 0.48, r: 0.26, crit: true }],
   trooper: [{ x: 0, y: 0.5, z: 0, r: 0.36, crit: false }, { x: 0, y: 1.25, z: 0, r: 0.46, crit: false }, { x: 0, y: 1.78, z: 0.02, r: 0.21, crit: true }],
   drone: [{ x: 0, y: 0, z: 0, r: 0.5, crit: false }],
+  boss: [{ x: 0, y: 0, z: 0, r: 1.45, crit: false }, { x: 1.68, y: 0.1, z: 0, r: 0.55, crit: false }, { x: -1.68, y: 0.1, z: 0, r: 0.55, crit: false }, { x: 0, y: 0, z: 1.12, r: 0.46, crit: true }],
   heavy: [
     { x: 0.42, y: 0.75, z: 0, r: 0.55, crit: false }, { x: -0.42, y: 0.75, z: 0, r: 0.55, crit: false },
     { x: 0, y: 2.3, z: 0, r: 1.0, crit: false }, { x: 0, y: 3.02, z: 0.05, r: 0.3, crit: true },
@@ -39,6 +41,10 @@ export interface EnemyCtx {
   /** Shared timers so fire from many robots is staggered instead of arriving at once. */
   shared: { droneCd: number; engaged: number };
   onKill(e: Enemy, crit: boolean): void;
+  /** Expanding floor ring the player must jump over. */
+  shockwave(at: THREE.Vector3, dmg: number): void;
+  /** Immediately brings in reinforcements through the gates. */
+  summon(type: EnemyType, count: number): void;
 }
 
 const v1 = new THREE.Vector3(), v2 = new THREE.Vector3(), v3 = new THREE.Vector3();
@@ -53,6 +59,9 @@ export class Enemy {
   alive = true;
   def: Def;
   flash = 0;
+  private mode = 0;
+  private lastMode = 0;
+  private stage = 0;
   private hull: THREE.MeshStandardMaterial;
   private eye: THREE.MeshBasicMaterial;
   private body: THREE.Object3D;
@@ -92,6 +101,8 @@ export class Enemy {
       this.chest = type === 'trooper' ? model.node('chest') : null;
     } else if (type === 'scuttler') {
       for (const s of ['R', 'L']) for (let i = 0; i < 3; i++) this.legs.push(model.node(`leg${s}${i}`));
+    } else if (type === 'boss') {
+      this.spin = [model.node('ringA'), model.node('ringB')];
     } else {
       for (const n of ['rotorRF', 'rotorRB', 'rotorLF', 'rotorLB']) this.spin.push(model.node(n));
     }
@@ -114,7 +125,7 @@ export class Enemy {
 
   /** Aim point for explosions and effects. */
   center(out: THREE.Vector3): THREE.Vector3 {
-    return out.set(this.pos.x, this.pos.y + (this.type === 'drone' ? 0 : this.def.height * 0.55), this.pos.z);
+    return out.set(this.pos.x, this.pos.y + (this.type === 'drone' || this.type === 'boss' ? 0 : this.def.height * 0.55), this.pos.z);
   }
 
   private fire(c: EnemyCtx, lx: number, ly: number, lz: number, speed: number, dmg: number, kind: 'bolt' | 'rocket', spread: number, lead: number) {
@@ -134,7 +145,7 @@ export class Enemy {
 
   update(dt: number, c: EnemyCtx) {
     this.age += dt;
-    const p = c.player, def = this.def, fly = this.type === 'drone';
+    const p = c.player, def = this.def, boss = this.type === 'boss', fly = this.type === 'drone' || boss;
     const dx = p.pos.x - this.pos.x, dz = p.pos.z - this.pos.z;
     const dist = Math.hypot(dx, dz) || 0.001;
     const dy = p.pos.y - this.pos.y;
@@ -199,6 +210,37 @@ export class Enemy {
           this.attackCd = 2.6 + Math.random();
         }
       }
+    } else if (boss) {
+      // Warden: slow orbit above the cover, cycling barrage, rocket salvo and ground pulse.
+      this.orbit += dt * 0.22 * this.strafe;
+      v1.set(Math.max(-21, Math.min(21, p.pos.x + Math.cos(this.orbit) * 14)), 5.3 + Math.sin(this.age * 0.8) * 0.5, Math.max(-21, Math.min(21, p.pos.z + Math.sin(this.orbit) * 14))).sub(this.pos);
+      const l = v1.length() || 1, k = Math.min(1, l / 4);
+      wx = (v1.x / l) * k; wy = (v1.y / l) * k; wz = (v1.z / l) * k;
+      facePlayer = true;
+      const rage = this.hp < this.maxHp * 0.33;
+      const stage = rage ? 2 : this.hp < this.maxHp * 0.66 ? 1 : 0;
+      if (stage > this.stage) { this.stage = stage; c.summon('scuttler', 3 + stage); }
+      if (this.mode === 0) {
+        if (this.attackCd <= 0 && this.age > 2.5) {
+          this.mode = this.lastMode = (this.lastMode % 3) + 1;
+          this.windup = this.mode === 3 ? 1.2 : 0.7;
+          this.burst = this.mode === 1 ? (rage ? 26 : 18) : this.mode === 2 ? (rage ? 5 : 3) : 1;
+          this.burstT = 0;
+          if (this.mode === 3) c.audio.charge(this.pos);
+        }
+      } else if (this.windup > 0) {
+        this.windup -= dt; speed *= 0.3;
+      } else {
+        speed *= 0.4;
+        this.burstT -= dt;
+        if (this.burstT <= 0 && this.burst > 0) {
+          this.burst--; this.side = -this.side;
+          if (this.mode === 1) { this.burstT = 0.1; if (this.los) this.fire(c, 0.35 * this.side, -1.05, 1.3, 28, 4, 'bolt', 0.1, 0.3); }
+          else if (this.mode === 2) { this.burstT = 0.32; this.fire(c, 1.68 * this.side, 0.1, 0.6, 15, 20, 'rocket', 0.05, 0.3); }
+          else c.shockwave(this.pos, 22 * this.dmgMult);
+        }
+        if (this.burst <= 0) { this.mode = 0; this.attackCd = rage ? 1.3 : 2.4; }
+      }
     } else {
       // Drone: circle the player at range and altitude.
       this.orbit += dt * 0.55 * this.strafe;
@@ -222,7 +264,7 @@ export class Enemy {
     if (fly) this.vel.y += (wy * speed - this.vel.y) * acc;
     this.pos.addScaledVector(this.vel, dt);
     if (fly) {
-      this.pos.y = Math.max(1.4, Math.min(CEIL - 1, this.pos.y));
+      this.pos.y = Math.max(boss ? 4.4 : 1.4, Math.min(CEIL - (boss ? 2.5 : 1), this.pos.y));
       c.world.pushOutSphere(this.pos, def.radius + 0.1);
     } else {
       this.pos.y = 0;
@@ -239,7 +281,7 @@ export class Enemy {
     if (facePlayer) want = Math.atan2(dx, dz); else if (hs > 0.3) want = Math.atan2(this.vel.x, this.vel.z);
     let dyaw = want - this.yaw;
     dyaw = Math.atan2(Math.sin(dyaw), Math.cos(dyaw));
-    this.yaw += dyaw * Math.min(1, dt * (this.type === 'heavy' ? 2.5 : 8));
+    this.yaw += dyaw * Math.min(1, dt * (this.type === 'heavy' || boss ? 2.5 : 8));
 
     // Animate
     const heavy = this.type === 'heavy';
@@ -271,6 +313,11 @@ export class Enemy {
       const w = this.windup > 0 ? 1 - this.windup / 0.32 : 0;
       this.body.position.y = Math.sin(this.walk * 2) * 0.018 * m - w * 0.1;
       this.body.rotation.x = -w * 0.38;
+    } else if (boss) {
+      this.spin[0].rotation.y += dt * (0.8 + (this.windup > 0 ? 3 : 0));
+      this.spin[1].rotation.y -= dt * 1.3;
+      this.body.rotation.x += (Math.max(-0.2, Math.min(0.7, aim * 0.8)) - this.body.rotation.x) * Math.min(1, dt * 4);
+      g.position.y += Math.sin(this.age * 1.7) * 0.08;
     } else {
       for (const r of this.spin) r.rotation.y += dt * 38;
       this.body.rotation.x = Math.max(-0.4, Math.min(0.4, hs * 0.05)) + aim * 0.5;
@@ -283,7 +330,7 @@ export class Enemy {
       this.smokeT -= dt;
       if (this.smokeT <= 0) {
         this.smokeT = 0.1 + Math.random() * 0.16;
-        c.effects.puff(this.center(v1), 1, heavy ? 0.9 : 0.45, 0.1);
+        c.effects.puff(this.center(v1), 1, heavy || boss ? 0.9 : 0.45, 0.1);
         if (Math.random() < 0.3) c.effects.sparks(v1, v2.set(0, 1, 0), 3);
       }
     }
@@ -329,11 +376,15 @@ export class EnemyManager {
     if (!e.alive) return false;
     e.hp -= amount;
     e.flash = 1;
-    if (push && e.type !== 'heavy') e.vel.addScaledVector(push, Math.min(4, amount * 0.05));
+    if (push && e.type !== 'heavy' && e.type !== 'boss') e.vel.addScaledVector(push, Math.min(4, amount * 0.05));
     if (e.hp > 0) return false;
     e.alive = false;
     const p = e.center(new THREE.Vector3());
-    const big = e.type === 'heavy';
+    const big = e.type === 'heavy' || e.type === 'boss';
+    if (e.type === 'boss') {
+      for (let i = 0; i < 5; i++) c.effects.explosion(new THREE.Vector3(p.x + (Math.random() - 0.5) * 3, p.y + (Math.random() - 0.5) * 2, p.z + (Math.random() - 0.5) * 3), 1.4);
+      c.effects.scatter(p, 26, 0.4);
+    }
     c.effects.explosion(p, big ? 1.6 : e.type === 'trooper' ? 0.8 : 0.55);
     c.effects.scatter(p, big ? 14 : e.type === 'trooper' ? 7 : 4, big ? 0.34 : 0.16);
     if (big) c.audio.explosion(p, true); else c.audio.robotDeath(p);
@@ -353,7 +404,7 @@ export class EnemyManager {
     const l = this.list;
     for (let i = 0; i < l.length; i++) for (let j = i + 1; j < l.length; j++) {
       const a = l[i], b = l[j];
-      if ((a.type === 'drone') !== (b.type === 'drone')) continue;
+      if ((a.type === 'drone') !== (b.type === 'drone') || a.type === 'boss' || b.type === 'boss') continue;
       const dx = b.pos.x - a.pos.x, dz = b.pos.z - a.pos.z, min = a.def.radius + b.def.radius;
       const d2 = dx * dx + dz * dz;
       if (d2 >= min * min || d2 < 1e-6) continue;

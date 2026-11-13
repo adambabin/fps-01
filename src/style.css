@@ -32,6 +32,7 @@ button.primary { background: var(--cyan); color: #051018; border-color: var(--cy
 button.primary:hover { background: #8be4ff; }
 .title-panel button.primary { background: var(--orange); border-color: var(--orange); }
 .title-panel button.primary:hover { background: #ffad6b; }
+.blurb { font-size: 12px; color: var(--dim); min-height: 16px; margin: -2px 0 2px; }
 .seg-label { font-size: 11px; letter-spacing: 0.28em; color: var(--dim); margin-top: 6px; }
 .seg { display: flex; gap: 6px; margin-bottom: 4px; }
 .seg button { flex: 1; padding: 9px 6px; font-size: 12px; }
@@ -94,6 +95,10 @@ button.primary:hover { background: #8be4ff; }
 #top { position: absolute; top: 20px; left: 50%; transform: translateX(-50%); text-align: center; }
 #wave { font-size: 20px; font-weight: 800; letter-spacing: 0.3em; }
 #remaining { font-size: 12px; letter-spacing: 0.2em; color: var(--dim); margin-top: 3px; }
+#boss { margin-top: 10px; }
+#boss-name { font-size: 12px; letter-spacing: 0.4em; color: var(--red); font-weight: 700; }
+#boss-bar { width: min(460px, 60vw); height: 9px; margin: 5px auto 0; background: rgba(8, 12, 16, 0.75); border: 1px solid rgba(255, 90, 70, 0.5); }
+#boss-fill { height: 100%; width: 100%; background: linear-gradient(90deg, #ff3a2a, #ff8f3d); transition: width 0.15s; }
 #score-box { position: absolute; top: 20px; right: 26px; text-align: right; }
 #score { font-size: 28px; font-weight: 800; font-variant-numeric: tabular-nums; letter-spacing: 0.04em; }
 #score-label { font-size: 11px; letter-spacing: 0.3em; color: var(--dim); }
@@ -124,7 +129,7 @@ button.primary:hover { background: #8be4ff; }
 #grenades { font-size: 13px; letter-spacing: 0.14em; color: var(--dim); margin-bottom: 8px; }
 #grenades b { color: #6dff8c; letter-spacing: 0.2em; }
 #slots { display: flex; gap: 5px; justify-content: flex-end; }
-.slot { font-size: 11px; letter-spacing: 0.1em; padding: 4px 8px; border: 1px solid var(--line); color: var(--dim); background: rgba(8, 12, 16, 0.55); text-transform: uppercase; }
+.slot { font-size: 10px; letter-spacing: 0.06em; padding: 4px 6px; border: 1px solid var(--line); color: var(--dim); background: rgba(8, 12, 16, 0.55); text-transform: uppercase; }
 .slot.active { color: #051018; background: var(--ink); border-color: var(--ink); text-shadow: none; font-weight: 700; }
 .slot.locked { opacity: 0.3; }
 #fps { position: absolute; left: 26px; top: 180px; font-size: 12px; color: var(--dim); font-variant-numeric: tabular-nums; }

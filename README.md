@@ -26,7 +26,7 @@ Then open the printed URL. `npm run build` type-checks and writes a static site 
 | Reload | R | |
 | Grenade | G | |
 | Sprint / Crouch / Jump | Shift / C / Space | |
-| Weapons | 1–4, scroll wheel, E for next | |
+| Weapons | 1–6, scroll wheel, E for next | |
 | Pause | Esc or P | |
 
 Settings → **Apply trackpad preset** raises sensitivity, makes aiming a toggle and disables
@@ -35,10 +35,11 @@ scroll-to-switch. Every binding can be changed in Settings.
 ## What is in the foundation
 
 - Movement: sprint, crouch, jump with coyote time, head bob, landing dip, FOV kick.
-- Four weapons (sidearm, assault rifle, shotgun, piercing railgun) with recoil, spread bloom,
-  damage falloff, reloads, aim-down-sights and weak-point multipliers, plus grenades.
+- Six weapons (sidearm, assault rifle, shotgun, piercing railgun, SMG, grenade launcher) with recoil,
+  spread bloom, damage falloff, reloads, aim-down-sights and weak-point multipliers, plus grenades.
 - Four robots: melee Scuttler, ranged Trooper, flying Drone and rocket-firing Juggernaut,
   steered by a shared flow field so they path around cover.
+- Three arenas (Reactor Hall, Foundry, Server Vault) and a boss, the Warden, every fifth wave.
 - Wave director, score, pickups (health, armor, ammo, grenades) and 12 stackable upgrades.
 - HUD with radar, hit markers, damage numbers and damage direction indicators.
 - Low / Medium / High graphics presets (shadows, MSAA, HDR bloom).

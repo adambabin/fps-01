@@ -15,6 +15,10 @@ export interface WeaponDef {
   hip: number; ads: number; bloom: number; kickP: number; kickY: number;
   zoom: number; adsTime: number; falloff: [number, number, number];
   crit: number; pierce: boolean;
+  /** Fires an explosive shell instead of an instant hit; the value is the shell speed. */
+  launch?: number;
+  /** Wave from which the unlock is offered, and the pitch on its upgrade card. */
+  unlockWave?: number; pitch?: string;
   hipPos: [number, number, number]; adsZ: number;
   tracer: [number, number, number];
 }
@@ -33,12 +37,24 @@ export const WEAPONS: WeaponDef[] = [
   {
     name: 'SG-12 Breacher', slot: 'Shotgun', sound: 'shotgun', auto: false, damage: 14, pellets: 10, rpm: 84, mag: 6, reserve: 36, reload: 2.3,
     hip: 0.062, ads: 0.045, bloom: 0, kickP: 0.07, kickY: 0.015, zoom: 1.15, adsTime: 0.22, falloff: [8, 24, 0.25],
-    crit: 1.4, pierce: false, hipPos: [0.135, -0.135, -0.38], adsZ: -0.3, tracer: [2.5, 1.8, 1],
+    crit: 1.4, pierce: false, unlockWave: 1, pitch: 'Unlock the pump shotgun. Ten pellets a shell; devastating up close.', hipPos: [0.135, -0.135, -0.38], adsZ: -0.3, tracer: [2.5, 1.8, 1],
   },
   {
     name: 'RX Lancer', slot: 'Railgun', sound: 'rail', auto: false, damage: 190, pellets: 1, rpm: 46, mag: 4, reserve: 20, reload: 2.6,
     hip: 0.03, ads: 0, bloom: 0, kickP: 0.09, kickY: 0.01, zoom: 2.6, adsTime: 0.28, falloff: [200, 300, 1],
-    crit: 2.2, pierce: true, hipPos: [0.14, -0.165, -0.4], adsZ: -0.3, tracer: [0.6, 3, 5],
+    crit: 2.2, pierce: true, unlockWave: 4, pitch: 'Unlock the railgun. Huge damage that punches through every robot in line.', hipPos: [0.14, -0.165, -0.4], adsZ: -0.3, tracer: [0.6, 3, 5],
+  },
+  {
+    name: 'VX-9 Hornet', slot: 'SMG', sound: 'smg', auto: true, damage: 14, pellets: 1, rpm: 960, mag: 40, reserve: 240, reload: 1.55,
+    hip: 0.015, ads: 0.006, bloom: 0.0035, kickP: 0.0055, kickY: 0.005, zoom: 1.2, adsTime: 0.13, falloff: [12, 30, 0.5],
+    crit: 1.6, pierce: false, unlockWave: 2, pitch: 'Unlock the submachine gun. Very fast and accurate from the hip, weak at range.',
+    hipPos: [0.13, -0.14, -0.38], adsZ: -0.3, tracer: [3, 2.4, 1.4],
+  },
+  {
+    name: 'GL-6 Thumper', slot: 'Launcher', sound: 'launcher', auto: false, damage: 170, pellets: 1, rpm: 72, mag: 6, reserve: 18, reload: 2.9,
+    hip: 0.01, ads: 0.003, bloom: 0, kickP: 0.06, kickY: 0.012, zoom: 1.25, adsTime: 0.24, falloff: [200, 300, 1],
+    crit: 1, pierce: false, launch: 40, unlockWave: 3, pitch: 'Unlock the grenade launcher. Arcing shells that burst on impact and clear groups.',
+    hipPos: [0.15, -0.16, -0.45], adsZ: -0.3, tracer: [3, 1.8, 0.5],
   },
 ];
 
@@ -50,6 +66,8 @@ export interface FireCtx {
   world: CollisionWorld; enemies: EnemyManager; effects: Effects; audio: AudioSys;
   camera: THREE.PerspectiveCamera;
   hitEnemy(e: Enemy, dmg: number, crit: boolean, point: THREE.Vector3, dir: THREE.Vector3): void;
+  /** Fires a launcher shell. */
+  launch(pos: THREE.Vector3, vel: THREE.Vector3, dmg: number): void;
 }
 
 const fwd = new THREE.Vector3(), right = new THREE.Vector3(), up = new THREE.Vector3(), dirv = new THREE.Vector3();
@@ -177,6 +195,8 @@ export class WeaponSystem {
     if (input.wasPressed('weapon2')) this.select(1);
     if (input.wasPressed('weapon3')) this.select(2);
     if (input.wasPressed('weapon4')) this.select(3);
+    if (input.wasPressed('weapon5')) this.select(4);
+    if (input.wasPressed('weapon6')) this.select(5);
     if (input.wasPressed('nextWeapon')) this.cycle(1);
     this.wheelCd -= dt;
     if (settings.scrollSwitch && input.wheel !== 0) {
@@ -260,7 +280,12 @@ export class WeaponSystem {
     const side = 0.15 * (1 - this.ads), drop = 0.12 * (1 - this.ads) + 0.03;
     start.copy(cam.position).addScaledVector(fwd, 0.7).addScaledVector(right, side).addScaledVector(up, -drop);
 
-    for (let p = 0; p < def.pellets; p++) {
+    if (def.launch) {
+      const a = Math.random() * Math.PI * 2, r = this.spread * Math.sqrt(Math.random());
+      dirv.copy(fwd).addScaledVector(right, Math.cos(a) * r).addScaledVector(up, Math.sin(a) * r + 0.035).normalize();
+      c.launch(start, dirv.multiplyScalar(def.launch).addScaledVector(player.vel, 0.4), def.damage * this.mods.damage);
+    }
+    for (let p = 0; p < (def.launch ? 0 : def.pellets); p++) {
       const a = Math.random() * Math.PI * 2, r = this.spread * Math.sqrt(Math.random());
       dirv.copy(fwd).addScaledVector(right, Math.cos(a) * r).addScaledVector(up, Math.sin(a) * r).normalize();
       const wall = c.world.raycast(cam.position, dirv, 200);

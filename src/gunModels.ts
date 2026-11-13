@@ -216,6 +216,74 @@ function railgun(): GunModel {
   return { group: r.bake(), muzzle: new THREE.Vector3(0, 0.009, -0.74), sightY: 0.0975, mag: r.root.getObjectByName('mag')! };
 }
 
+function smg(): GunModel {
+  const r = rig();
+  r.node('mag', 'root');
+  r.add('root', 'black', box(0.04, 0.058, 0.25, 0.007), { p: [0, 0.02, 0] })
+    .add('root', 'black', prismX([[0.11, -0.008], [-0.125, -0.008], [-0.125, -0.034], [-0.06, -0.04], [0.02, -0.04], [0.11, -0.03]], 0.036, 0.004))
+    .add('root', 'steel', box(0.004, 0.016, 0.05), { p: [0.0205, 0.024, -0.02] })
+    .add('root', 'dark', box(0.004, 0.011, 0.042), { p: [0.0212, 0.024, -0.02] })
+    .add('root', 'black', cyl(0.021, 0.17, 'z', 8), { p: [0, 0.02, -0.2] })
+    .add('root', 'steel', cyl(0.012, 0.035, 'z'), { p: [0, 0.02, -0.3] })
+    .add('root', 'dark', cyl(0.007, 0.037, 'z'), { p: [0, 0.02, -0.301] })
+    .add('root', 'poly', prismX([[0.06, -0.028], [0.096, -0.028], [0.134, -0.13], [0.096, -0.138]], 0.03, 0.007))
+    .add('root', 'black', box(0.006, 0.004, 0.062), { p: [0, -0.062, 0.03] })
+    .add('root', 'steel', box(0.006, 0.022, 0.007), { p: [0, -0.046, 0.04], r: [0.2, 0, 0] })
+    .add('root', 'poly', box(0.034, 0.03, 0.1, 0.01), { p: [0, -0.012, -0.19] })
+    .add('root', 'rubber', box(0.04, 0.095, 0.012, 0.004), { p: [0, 0.0, 0.34] })
+    .add('root', 'black', box(0.004, 0.012, 0.006), { p: [0, 0.058, -0.27] });
+  for (let i = 0; i < 4; i++) r.add('root', 'dark', box(0.046, 0.009, 0.02, 0.003), { p: [0, 0.02, -0.14 - i * 0.035] });
+  for (const s of [1, -1]) r.add('root', 'steel', tube([0.016 * s, 0.03, 0.12], [0.016 * s, 0.03, 0.335], 0.004, 0.004, 6));
+  rail(r, 'root', 0.0495, -0.1, 0.11);
+  // Compact reflex sight
+  r.add('root', 'black', box(0.028, 0.01, 0.045, 0.003), { p: [0, 0.062, -0.01] })
+    .add('root', 'black', box(0.04, 0.0035, 0.036, 0.0015), { p: [0, 0.069, -0.01] })
+    .add('root', 'black', box(0.04, 0.0035, 0.036, 0.0015), { p: [0, 0.1, -0.01] })
+    .add('root', 'glass', box(0.033, 0.028, 0.001), { p: [0, 0.0845, -0.02] })
+    .add('root', 'red', box(0.0022, 0.0022, 0.0006), { p: [0, 0.0845, -0.019] });
+  for (const s of [1, -1]) r.add('root', 'black', box(0.0035, 0.032, 0.036, 0.0015), { p: [0.0185 * s, 0.0845, -0.01] });
+  r.add('mag', 'black', box(0.024, 0.2, 0.036, 0.004), { p: [0, -0.135, -0.03], r: [0.06, 0, 0] })
+    .add('mag', 'rubber', box(0.028, 0.012, 0.04, 0.003), { p: [0, -0.238, -0.036], r: [0.06, 0, 0] });
+  gripHand(r, 'root', -0.078, 0.092, [0.13, -0.33, 0.4]);
+  supportHand(r, 'root', -0.027, -0.19, 0.017);
+  return { group: r.bake(), muzzle: new THREE.Vector3(0, 0.02, -0.33), sightY: 0.0845, mag: r.root.getObjectByName('mag')! };
+}
+
+function launcher(): GunModel {
+  const r = rig();
+  r.node('mag', 'root');
+  r.add('root', 'plate', cyl(0.031, 0.36, 'z', 16), { p: [0, 0.02, -0.33] })
+    .add('root', 'dark', cyl(0.025, 0.362, 'z', 16), { p: [0, 0.02, -0.331] })
+    .add('root', 'black', cyl(0.035, 0.03, 'z', 16), { p: [0, 0.02, -0.5] })
+    .add('root', 'black', box(0.03, 0.02, 0.32, 0.005), { p: [0, 0.072, -0.08] })
+    .add('root', 'black', prismX([[0.0, 0.082], [0.11, 0.07], [0.13, -0.03], [0.0, -0.07]], 0.05, 0.007))
+    .add('root', 'black', box(0.044, 0.12, 0.022, 0.005), { p: [0, 0.01, -0.158] })
+    .add('root', 'poly', prismX([[0.07, -0.03], [0.108, -0.03], [0.148, -0.14], [0.108, -0.148]], 0.032, 0.007))
+    .add('root', 'black', box(0.006, 0.004, 0.066), { p: [0, -0.066, 0.04] })
+    .add('root', 'steel', box(0.006, 0.024, 0.008), { p: [0, -0.048, 0.05], r: [0.2, 0, 0] })
+    .add('root', 'poly', box(0.046, 0.04, 0.15, 0.013), { p: [0, -0.028, -0.3] })
+    .add('root', 'black', cyl(0.014, 0.2, 'z'), { p: [0, 0.03, 0.2] })
+    .add('root', 'poly', prismX([[0.2, 0.05], [0.37, 0.052], [0.375, -0.07], [0.34, -0.08], [0.27, -0.015], [0.2, -0.008]], 0.042, 0.007))
+    .add('root', 'rubber', box(0.044, 0.13, 0.012, 0.004), { p: [0, -0.012, 0.38] })
+    // Leaf sight with a glowing crossbar, and a front post
+    .add('root', 'black', box(0.034, 0.003, 0.004), { p: [0, 0.122, -0.11] })
+    .add('root', 'red', box(0.026, 0.0016, 0.002), { p: [0, 0.102, -0.11] })
+    .add('root', 'red', box(0.003, 0.003, 0.002), { p: [0, 0.102, -0.111] })
+    .add('root', 'black', box(0.004, 0.036, 0.004), { p: [0, 0.07, -0.49] });
+  for (const s of [1, -1]) r.add('root', 'black', box(0.003, 0.042, 0.004), { p: [0.0155 * s, 0.102, -0.11] });
+  // Six-round cylinder
+  r.add('mag', 'black', cyl(0.06, 0.13, 'z', 12), { p: [0, 0.0, -0.075] });
+  for (let i = 0; i < 6; i++) {
+    const a = (i / 6) * Math.PI * 2;
+    r.add('mag', 'dark', cyl(0.017, 0.134, 'z', 10), { p: [Math.sin(a) * 0.037, Math.cos(a) * 0.037, -0.075] })
+      .add('mag', 'brass', cyl(0.0155, 0.004, 'z', 10), { p: [Math.sin(a) * 0.037, Math.cos(a) * 0.037, -0.008] })
+      .add('mag', 'plate', box(0.01, 0.012, 0.1, 0.003), { p: [Math.sin(a + 0.52) * 0.058, Math.cos(a + 0.52) * 0.058, -0.075], r: [0, 0, -a - 0.52] });
+  }
+  gripHand(r, 'root', -0.088, 0.105);
+  supportHand(r, 'root', -0.048, -0.3, 0.023);
+  return { group: r.bake(), muzzle: new THREE.Vector3(0, 0.02, -0.53), sightY: 0.102, mag: r.root.getObjectByName('mag')! };
+}
+
 export function buildGun(i: number): GunModel {
-  return i === 0 ? pistol() : i === 1 ? rifle() : i === 2 ? shotgun() : railgun();
+  return i === 0 ? pistol() : i === 1 ? rifle() : i === 2 ? shotgun() : i === 3 ? railgun() : i === 4 ? smg() : launcher();
 }

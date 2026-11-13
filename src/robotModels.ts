@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { Rig, box, cable, cyl, prismX, prismY, sphere, torus, tube, type Finish, type V2 } from './modelkit';
 import { makeSurface } from './textures';
 
-export type RobotKind = 'scuttler' | 'trooper' | 'drone' | 'heavy';
+export type RobotKind = 'scuttler' | 'trooper' | 'drone' | 'heavy' | 'boss';
 
 const hullMaps = makeSurface({ seed: 63, color: [255, 255, 255], panels: 2, stagger: true, roughness: 0.46, wear: 1.5, bump: 4 }, 512);
 const mechMaps = makeSurface({ seed: 71, color: [255, 255, 255], panels: 0, roughness: 0.4, wear: 1.2, bump: 2.5 }, 256);
@@ -26,6 +26,7 @@ const PALETTE: Record<RobotKind, { armor: number; paint: number; trim: number }>
   scuttler: { armor: 0x6e6455, paint: 0x8a3c1c, trim: 0x2c2823 },
   drone: { armor: 0x5a626c, paint: 0xa8831d, trim: 0x25282d },
   heavy: { armor: 0x5f636b, paint: 0x842f1c, trim: 0xa8831d },
+  boss: { armor: 0x4a4d55, paint: 0x8f1f18, trim: 0xa8831d },
 };
 
 function rig(kind: RobotKind, tex: number): Rig {
@@ -227,6 +228,55 @@ function buildHeavy(): THREE.Group {
   return r.bake();
 }
 
+/** The Warden: a hovering command unit with counter-rotating shield rings. */
+function buildBoss(): THREE.Group {
+  const r = rig('boss', 1.3);
+  r.node('body', 'root').node('ringA', 'root').node('ringB', 'root');
+  r.add('body', 'armor', sphere(1.2, 24), { s: [1, 0.82, 1] })
+    .add('body', 'trim', cyl(1.3, 0.26, 'y', 24), { p: [0, 0.02, 0] })
+    .add('body', 'frame', cyl(1.34, 0.08, 'y', 24), { p: [0, 0.02, 0] })
+    .add('body', 'armor', cyl(0.7, 0.3, 'y', 12, 0.5), { p: [0, 0.95, 0] })
+    .add('body', 'frame', tube([0.2, 1.05, -0.2], [0.3, 1.9, -0.3], 0.02))
+    .add('body', 'frame', tube([-0.25, 1.05, -0.1], [-0.3, 1.6, -0.15], 0.02))
+    .add('body', 'dark', cyl(0.56, 0.3, 'z', 20), { p: [0, 0, 1.02] })
+    .add('body', 'steel', torus(0.5, 0.07, 'z', 28), { p: [0, 0, 1.17] })
+    .add('body', 'eye', sphere(0.3, 16), { p: [0, 0, 1.08] })
+    .add('body', 'frame', cyl(0.52, 0.5, 'y', 12), { p: [0, -0.95, 0] })
+    .add('body', 'frame', box(0.5, 0.3, 0.7, 0.06), { p: [0, -1.05, 0.45] });
+  for (let i = 0; i < 4; i++) {
+    const a = Math.PI / 4 + (i * Math.PI) / 2;
+    r.add('body', 'paint', box(0.95, 0.9, 0.14, 0.05), { p: [Math.sin(a) * 1.17, 0.42, Math.cos(a) * 1.17], r: [-0.42, a, 0] });
+  }
+  for (let i = 0; i < 3; i++) {
+    const a = (i / 3) * Math.PI * 2 + Math.PI;
+    r.add('body', 'steel', cyl(0.24, 0.4, 'y', 12), { p: [Math.sin(a) * 0.75, -0.95, Math.cos(a) * 0.75] });
+    amber(r, 'body', cyl(0.18, 0.02, 'y', 12), [Math.sin(a) * 0.75, -1.16, Math.cos(a) * 0.75]);
+  }
+  r.pair((s) => {
+    r.add('body', 'steel', cyl(0.095, 1.0, 'z', 12), { p: [0.35 * s, -1.05, 0.75] })
+      .add('body', 'dark', cyl(0.06, 1.01, 'z', 12), { p: [0.35 * s, -1.05, 0.752] })
+      .add('body', 'frame', tube([1.1 * s, 0.05, 0], [1.45 * s, 0.1, 0], 0.16, 0.13))
+      .add('body', 'trim', box(0.55, 0.62, 0.95, 0.05), { p: [1.68 * s, 0.1, 0] })
+      .add('body', 'frame', box(0.46, 0.52, 0.04, 0.01), { p: [1.68 * s, 0.1, 0.48] })
+      .add('body', 'armor', box(0.6, 0.06, 1.0, 0.02), { p: [1.68 * s, 0.44, 0] });
+    for (const ox of [-0.12, 0.12]) for (const oy of [-0.13, 0.13]) {
+      r.add('body', 'steel', cyl(0.085, 0.06, 'z', 12), { p: [1.68 * s + ox, 0.1 + oy, 0.5] })
+        .add('body', 'dark', cyl(0.065, 0.062, 'z', 12), { p: [1.68 * s + ox, 0.1 + oy, 0.501] });
+    }
+  });
+  r.add('ringA', 'armor', torus(2.05, 0.085, 'y', 40));
+  for (let i = 0; i < 6; i++) {
+    const a = (i / 6) * Math.PI * 2;
+    r.add('ringA', 'paint', box(0.8, 0.55, 0.09, 0.03), { p: [Math.sin(a) * 2.05, 0, Math.cos(a) * 2.05], r: [0, a, 0] });
+  }
+  r.add('ringB', 'frame', torus(1.72, 0.05, 'y', 36), { r: [0.45, 0, 0] });
+  for (let i = 0; i < 3; i++) {
+    const a = (i / 3) * Math.PI * 2;
+    r.add('ringB', 'steel', sphere(0.13, 10), { p: [Math.sin(a) * 1.72, -Math.cos(a) * 1.72 * Math.sin(0.45), Math.cos(a) * 1.72 * Math.cos(0.45)] });
+  }
+  return r.bake();
+}
+
 // Amber accents are written as HDR vertex colors after baking.
 const AMBER = new THREE.Color().setRGB(3.2, 1.3, 0.25);
 function tintGlow(root: THREE.Group) {
@@ -251,7 +301,7 @@ export interface RobotModel {
 export function createRobot(kind: RobotKind): RobotModel {
   let t = templates.get(kind);
   if (!t) {
-    t = kind === 'trooper' ? buildTrooper() : kind === 'scuttler' ? buildScuttler() : kind === 'drone' ? buildDrone() : buildHeavy();
+    t = kind === 'trooper' ? buildTrooper() : kind === 'scuttler' ? buildScuttler() : kind === 'drone' ? buildDrone() : kind === 'boss' ? buildBoss() : buildHeavy();
     tintGlow(t);
     templates.set(kind, t);
   }

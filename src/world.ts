@@ -6,6 +6,41 @@ import { makeHazardTexture, makeRadialTexture, makeSurface, type SurfaceMaps } f
 export const ARENA = 30;
 export const CEIL = 9;
 
+export type ArenaId = 'reactor' | 'foundry' | 'vault';
+export const ARENAS: Record<ArenaId, { name: string; blurb: string }> = {
+  reactor: { name: 'Reactor Hall', blurb: 'Open floor around the core. Long sightlines, scattered cover.' },
+  foundry: { name: 'Foundry', blurb: 'Furnaces and conveyor lines around a molten crucible.' },
+  vault: { name: 'Server Vault', blurb: 'Tight aisles between server racks. Close-quarters fighting.' },
+};
+
+interface Theme {
+  floor: number; wall: number; trim: number; dark: number;
+  stripA: [number, number, number]; stripB: [number, number, number]; core: [number, number, number]; panel: [number, number, number];
+  fog: number; fogDensity: number; hemiSky: number; hemiGround: number; hemi: number; sun: number; sunI: number;
+  corners: [number, number]; cornerI: number; coreLight: number; coreI: number; coreY: number;
+}
+
+const THEMES: Record<ArenaId, Theme> = {
+  reactor: {
+    floor: 0xffffff, wall: 0xffffff, trim: 0xb4bac2, dark: 0x4a4e57,
+    stripA: [0.3, 2.2, 3.2], stripB: [3.4, 1.2, 0.25], core: [0.3, 2.2, 3.2], panel: [2.6, 2.7, 3.0],
+    fog: 0x0a0e13, fogDensity: 0.014, hemiSky: 0x9db2cc, hemiGround: 0x3a332c, hemi: 1.0, sun: 0xdfe8ff, sunI: 1.5,
+    corners: [0xffa55c, 0x6fb6ff], cornerI: 140, coreLight: 0x48c8ff, coreI: 60, coreY: 3.2,
+  },
+  foundry: {
+    floor: 0xd9c8b8, wall: 0xc9b29c, trim: 0xa89684, dark: 0x4a3f38,
+    stripA: [3.6, 1.1, 0.2], stripB: [3.2, 2.0, 0.5], core: [4.2, 1.3, 0.15], panel: [3.0, 2.3, 1.6],
+    fog: 0x160d08, fogDensity: 0.019, hemiSky: 0xc9a988, hemiGround: 0x3a2618, hemi: 0.85, sun: 0xffd9b0, sunI: 1.25,
+    corners: [0xff8a3c, 0xffb46a], cornerI: 150, coreLight: 0xff6a1a, coreI: 150, coreY: 4.2,
+  },
+  vault: {
+    floor: 0xc4d2e0, wall: 0xb4c4d6, trim: 0xa9b6c4, dark: 0x343b46,
+    stripA: [0.5, 2.6, 3.4], stripB: [0.4, 3.0, 1.2], core: [1.6, 2.6, 3.6], panel: [2.2, 2.9, 3.4],
+    fog: 0x070c14, fogDensity: 0.021, hemiSky: 0x9cc0ea, hemiGround: 0x1c2630, hemi: 0.95, sun: 0xcfe4ff, sunI: 1.15,
+    corners: [0x6fb6ff, 0x8fe0ff], cornerI: 120, coreLight: 0x9fdcff, coreI: 80, coreY: 3.4,
+  },
+};
+
 interface BoxOpts { collide?: boolean; cast?: boolean; tex?: number; receive?: boolean; }
 
 /** Box geometry whose UVs follow its real size so textures never stretch. */
@@ -39,19 +74,101 @@ export class World {
   gates: { pos: THREE.Vector3; dir: THREE.Vector3 }[] = [];
   /** Ceiling vents where drones enter. */
   vents: THREE.Vector3[] = [];
-  sun!: THREE.DirectionalLight;
-  private dust!: THREE.Points;
-  private pulse: THREE.MeshBasicMaterial[] = [];
-  private coreLight!: THREE.PointLight;
+  sun: THREE.DirectionalLight;
+  current: ArenaId | null = null;
+  /** Everything that belongs to the loaded arena, so it can be swapped out. */
+  private group = new THREE.Group();
+  private dust: THREE.Points;
+  private hemi: THREE.HemisphereLight;
+  // The light count never changes between arenas; lights are only re-coloured and moved.
+  private corners: THREE.PointLight[] = [];
+  private coreLight: THREE.PointLight;
+  private fog: THREE.FogExp2;
+  private theme: Theme = THEMES.reactor;
+  private m: {
+    floor: THREE.MeshStandardMaterial; wall: THREE.MeshStandardMaterial; pillar: THREE.MeshStandardMaterial;
+    crate: THREE.MeshStandardMaterial; crate2: THREE.MeshStandardMaterial; contA: THREE.MeshStandardMaterial; contB: THREE.MeshStandardMaterial;
+    trim: THREE.MeshStandardMaterial; dark: THREE.MeshStandardMaterial; hazard: THREE.MeshStandardMaterial;
+    stripA: THREE.MeshBasicMaterial; stripB: THREE.MeshBasicMaterial; red: THREE.MeshBasicMaterial; core: THREE.MeshBasicMaterial; panel: THREE.MeshBasicMaterial;
+  };
 
   constructor(private scene: THREE.Scene, renderer: THREE.WebGLRenderer) {
     const pmrem = new THREE.PMREMGenerator(renderer);
     scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
     scene.environmentIntensity = 0.42;
     scene.background = new THREE.Color(0x06080b);
-    scene.fog = new THREE.FogExp2(0x0a0e13, 0.014);
+    this.fog = new THREE.FogExp2(0x0a0e13, 0.014);
+    scene.fog = this.fog;
     pmrem.dispose();
-    this.build();
+    scene.add(this.group);
+
+    const floorMaps = makeSurface({ seed: 11, color: [92, 96, 102], panels: 4, rivets: true, roughness: 0.5, wear: 1, bump: 5 });
+    const wallMaps = makeSurface({ seed: 23, color: [104, 108, 112], panels: 2, stagger: true, ribs: 8, roughness: 0.62, wear: 0.9, bump: 5 });
+    const crateMaps = makeSurface({ seed: 37, color: [128, 122, 108], panels: 1, frame: true, rivets: true, roughness: 0.58, wear: 1.2, bump: 6 });
+    const plainMaps = makeSurface({ seed: 51, color: [70, 73, 78], panels: 0, roughness: 0.48, wear: 1.1, bump: 3 }, 256);
+    const hazard = makeHazardTexture();
+    hazard.repeat.set(3, 0.5);
+    this.m = {
+      floor: std(floorMaps, 0.6), wall: std(wallMaps, 0.4), pillar: std(wallMaps, 0.45, 0xa4aab2),
+      crate: std(crateMaps, 0.3), crate2: std(crateMaps, 0.3, 0x6f8494),
+      contA: std(wallMaps, 0.35, 0x9a4f39), contB: std(wallMaps, 0.35, 0x41647e),
+      trim: std(plainMaps, 0.45, 0xb4bac2), dark: std(plainMaps, 0.4, 0x4a4e57),
+      hazard: new THREE.MeshStandardMaterial({ map: hazard, roughness: 0.7, metalness: 0.3, polygonOffset: true, polygonOffsetFactor: -2 }),
+      stripA: glow(1, 1, 1), stripB: glow(1, 1, 1), red: glow(3.6, 0.25, 0.15), core: glow(1, 1, 1), panel: glow(1, 1, 1),
+    };
+
+    this.hemi = new THREE.HemisphereLight(0x9db2cc, 0x3a332c, 1.0);
+    const sun = new THREE.DirectionalLight(0xdfe8ff, 1.5);
+    sun.position.set(14, 34, 9);
+    sun.castShadow = true;
+    const c = sun.shadow.camera;
+    c.left = -36; c.right = 36; c.top = 36; c.bottom = -36; c.near = 2; c.far = 60;
+    sun.shadow.bias = -0.0004; sun.shadow.normalBias = 0.04;
+    scene.add(this.hemi, sun, sun.target);
+    this.sun = sun;
+    for (const [x, z] of [[19, 19], [-19, 19], [19, -19], [-19, -19]]) {
+      const l = new THREE.PointLight(0xffffff, 140, 36, 1.6);
+      l.position.set(x, 6.5, z);
+      scene.add(l);
+      this.corners.push(l);
+    }
+    this.coreLight = new THREE.PointLight(0x48c8ff, 60, 26, 1.8);
+    scene.add(this.coreLight);
+
+    const n = 500, pos = new Float32Array(n * 3);
+    for (let i = 0; i < n; i++) {
+      pos[i * 3] = (Math.random() - 0.5) * ARENA * 2;
+      pos[i * 3 + 1] = Math.random() * CEIL;
+      pos[i * 3 + 2] = (Math.random() - 0.5) * ARENA * 2;
+    }
+    const dg = new THREE.BufferGeometry();
+    dg.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+    this.dust = new THREE.Points(dg, new THREE.PointsMaterial({ color: 0x9fb4c8, size: 0.05, map: makeRadialTexture('rgba(255,255,255,1)', 'rgba(255,255,255,0)'), transparent: true, opacity: 0.4, depthWrite: false }));
+    scene.add(this.dust);
+  }
+
+  /** Swaps in an arena: geometry, collision boxes, spawn points and lighting mood. */
+  load(id: ArenaId) {
+    if (this.current === id) return;
+    this.current = id;
+    for (const o of [...this.group.children]) {
+      this.group.remove(o);
+      (o as THREE.Mesh).geometry?.dispose();
+    }
+    this.collision.boxes.length = 0;
+    this.gates = []; this.vents = [];
+
+    const t = this.theme = THEMES[id], m = this.m;
+    m.floor.color.setHex(t.floor); m.wall.color.setHex(t.wall); m.trim.color.setHex(t.trim); m.dark.color.setHex(t.dark);
+    m.stripA.color.setRGB(...t.stripA); m.stripB.color.setRGB(...t.stripB); m.panel.color.setRGB(...t.panel);
+    this.fog.color.setHex(t.fog); this.fog.density = t.fogDensity;
+    this.hemi.color.setHex(t.hemiSky); this.hemi.groundColor.setHex(t.hemiGround); this.hemi.intensity = t.hemi;
+    this.sun.color.setHex(t.sun); this.sun.intensity = t.sunI;
+    this.corners.forEach((l, i) => { l.color.setHex(t.corners[i === 0 || i === 3 ? 0 : 1]); l.intensity = t.cornerI; });
+    this.coreLight.color.setHex(t.coreLight); this.coreLight.position.set(0, t.coreY, 0);
+
+    this.shell();
+    if (id === 'reactor') this.buildReactor(); else if (id === 'foundry') this.buildFoundry(); else this.buildVault();
   }
 
   private box(cx: number, cy: number, cz: number, sx: number, sy: number, sz: number, mat: THREE.Material, o: BoxOpts = {}) {
@@ -61,202 +178,218 @@ export class World {
     mesh.receiveShadow = o.receive ?? true;
     mesh.matrixAutoUpdate = false;
     mesh.updateMatrix();
-    this.scene.add(mesh);
+    this.group.add(mesh);
     if (o.collide ?? true) this.collision.add(cx, cy, cz, sx, sy, sz);
     return mesh;
   }
 
-  private build() {
-    const s = this.scene, A = ARENA, H = CEIL;
-    const floorMaps = makeSurface({ seed: 11, color: [92, 96, 102], panels: 4, rivets: true, roughness: 0.5, wear: 1, bump: 5 });
-    const wallMaps = makeSurface({ seed: 23, color: [104, 108, 112], panels: 2, stagger: true, ribs: 8, roughness: 0.62, wear: 0.9, bump: 5 });
-    const crateMaps = makeSurface({ seed: 37, color: [128, 122, 108], panels: 1, frame: true, rivets: true, roughness: 0.58, wear: 1.2, bump: 6 });
-    const plainMaps = makeSurface({ seed: 51, color: [70, 73, 78], panels: 0, roughness: 0.48, wear: 1.1, bump: 3 }, 256);
+  /** Non-colliding decorative mesh. */
+  private deco(geo: THREE.BufferGeometry, mat: THREE.Material, x: number, y: number, z: number, cast = true): THREE.Mesh {
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.position.set(x, y, z);
+    mesh.castShadow = cast; mesh.receiveShadow = cast;
+    this.group.add(mesh);
+    return mesh;
+  }
 
-    const floorMat = std(floorMaps, 0.6);
-    const wallMat = std(wallMaps, 0.4);
-    const pillarMat = std(wallMaps, 0.45, 0xa4aab2);
-    const crateMat = std(crateMaps, 0.3);
-    const crateMat2 = std(crateMaps, 0.3, 0x6f8494);
-    const containerA = std(wallMaps, 0.35, 0x9a4f39);
-    const containerB = std(wallMaps, 0.35, 0x41647e);
-    const trimMat = std(plainMaps, 0.45, 0xb4bac2);
-    const darkMat = std(plainMaps, 0.4, 0x4a4e57);
-    const cyan = glow(0.3, 2.2, 3.2), orange = glow(3.4, 1.2, 0.25), red = glow(3.6, 0.25, 0.15), white = glow(2.6, 2.7, 3.0);
-    this.pulse.push(red, cyan);
+  /** Glowing strip with no collision or shadows. */
+  private lamp(cx: number, cy: number, cz: number, sx: number, sy: number, sz: number, mat: THREE.Material) {
+    return this.box(cx, cy, cz, sx, sy, sz, mat, { collide: false, cast: false, receive: false });
+  }
 
-    // Shell
-    this.box(0, -0.5, 0, A * 2, 1, A * 2, floorMat, { cast: false, tex: 4 });
-    this.box(0, H + 0.5, 0, A * 2 + 2, 1, A * 2 + 2, darkMat, { cast: false, receive: false });
-    this.box(0, H / 2, -A - 0.5, A * 2 + 2, H, 1, wallMat, { cast: false, tex: 6 });
-    this.box(0, H / 2, A + 0.5, A * 2 + 2, H, 1, wallMat, { cast: false, tex: 6 });
-    this.box(-A - 0.5, H / 2, 0, 1, H, A * 2, wallMat, { cast: false, tex: 6 });
-    this.box(A + 0.5, H / 2, 0, 1, H, A * 2, wallMat, { cast: false, tex: 6 });
+  /** Low cover wall with a dark cap. */
+  private barrier(x: number, z: number, sx: number, sz: number) {
+    this.box(x, 0.6, z, sx, 1.2, sz, this.m.trim, { tex: 2 });
+    this.box(x, 1.23, z, sx + 0.1, 0.08, sz + 0.1, this.m.dark, { collide: false });
+  }
 
-    // Ceiling girders and light panels
+  /** Floor, walls, ceiling, wall fixtures and the four spawn gates shared by every arena. */
+  private shell() {
+    const A = ARENA, H = CEIL, m = this.m;
+    this.box(0, -0.5, 0, A * 2, 1, A * 2, m.floor, { cast: false, tex: 4 });
+    this.box(0, H + 0.5, 0, A * 2 + 2, 1, A * 2 + 2, m.dark, { cast: false, receive: false });
+    this.box(0, H / 2, -A - 0.5, A * 2 + 2, H, 1, m.wall, { cast: false, tex: 6 });
+    this.box(0, H / 2, A + 0.5, A * 2 + 2, H, 1, m.wall, { cast: false, tex: 6 });
+    this.box(-A - 0.5, H / 2, 0, 1, H, A * 2, m.wall, { cast: false, tex: 6 });
+    this.box(A + 0.5, H / 2, 0, 1, H, A * 2, m.wall, { cast: false, tex: 6 });
+
     for (let i = -2; i <= 2; i++) {
-      this.box(i * 12, H - 0.45, 0, 0.6, 0.9, A * 2, darkMat, { collide: false, cast: false });
-      this.box(0, H - 0.75, i * 12, A * 2, 0.3, 0.4, darkMat, { collide: false, cast: false });
+      this.box(i * 12, H - 0.45, 0, 0.6, 0.9, A * 2, m.dark, { collide: false, cast: false });
+      this.box(0, H - 0.75, i * 12, A * 2, 0.3, 0.4, m.dark, { collide: false, cast: false });
     }
     for (let x = -18; x <= 18; x += 12) for (let z = -18; z <= 18; z += 12) {
-      this.box(x, H - 0.06, z, 3.2, 0.1, 1.1, white, { collide: false, cast: false, receive: false });
-      this.box(x, H - 0.12, z, 3.6, 0.22, 1.5, darkMat, { collide: false, cast: false, receive: false });
+      this.lamp(x, H - 0.06, z, 3.2, 0.1, 1.1, m.panel);
+      this.lamp(x, H - 0.12, z, 3.6, 0.22, 1.5, m.dark);
     }
 
-    // Wall skirting, light strips and pipe runs
     const pipeGeo = new THREE.CylinderGeometry(0.16, 0.16, A * 2, 10);
     for (const [ax, sgn] of [[0, 1], [0, -1], [1, 1], [1, -1]] as const) {
       const along = ax === 0;
       const p = (A - 0.12) * sgn;
-      const place = (y: number, t: number, h: number, mat: THREE.Material, len = A * 2) =>
-        along ? this.box(0, y, p, len, h, t, mat, { collide: false, cast: false }) : this.box(p, y, 0, t, h, len, mat, { collide: false, cast: false });
-      place(0.25, 0.3, 0.5, trimMat);
-      place(4.6, 0.26, 0.5, trimMat);
+      const place = (y: number, t: number, h: number, mat: THREE.Material) =>
+        along ? this.box(0, y, p, A * 2, h, t, mat, { collide: false, cast: false }) : this.box(p, y, 0, t, h, A * 2, mat, { collide: false, cast: false });
+      place(0.25, 0.3, 0.5, m.trim);
+      place(4.6, 0.26, 0.5, m.trim);
       for (const [y, off] of [[6.3, 0.35], [6.8, 0.3], [7.5, 0.4]] as const) {
-        const pipe = new THREE.Mesh(pipeGeo, y === 6.8 ? containerA : trimMat);
+        const q = (A - off) * sgn;
+        const pipe = this.deco(pipeGeo, y === 6.8 ? m.contA : m.trim, along ? 0 : q, y, along ? q : 0, false);
         pipe.rotation.z = Math.PI / 2;
         if (!along) pipe.rotation.y = Math.PI / 2;
-        const q = (A - off) * sgn;
-        pipe.position.set(along ? 0 : q, y, along ? q : 0);
-        pipe.matrixAutoUpdate = false; pipe.updateMatrix();
-        s.add(pipe);
       }
-      // Light strips broken into segments so they read as fixtures.
       for (let k = -4; k <= 4; k++) {
         if (k === 0) continue;
-        const c = k * 6.2, m = Math.abs(k) % 2 ? cyan : orange;
-        if (along) this.box(c, 4.6, (A - 0.28) * sgn, 2.4, 0.09, 0.06, m, { collide: false, cast: false, receive: false });
-        else this.box((A - 0.28) * sgn, 4.6, c, 0.06, 0.09, 2.4, m, { collide: false, cast: false, receive: false });
+        const c = k * 6.2, mat = Math.abs(k) % 2 ? m.stripA : m.stripB;
+        if (along) this.lamp(c, 4.6, (A - 0.28) * sgn, 2.4, 0.09, 0.06, mat);
+        else this.lamp((A - 0.28) * sgn, 4.6, c, 0.06, 0.09, 2.4, mat);
       }
       // Spawn gate
       const gx = along ? 0 : (A - 0.2) * sgn, gz = along ? (A - 0.2) * sgn : 0;
       const w = (a: number, b: number): [number, number] => (along ? [a, b] : [b, a]);
       const [fx, fz] = w(5.6, 0.5);
-      this.box(gx, 3.9, gz, fx, 0.5, fz, trimMat, { collide: false, cast: false });
+      this.box(gx, 3.9, gz, fx, 0.5, fz, m.trim, { collide: false, cast: false });
       for (const side of [-1, 1]) {
         const [ox, oz] = w(2.8 * side, 0);
-        const [px, pz] = w(0.5, 0.5);
-        this.box(gx + ox, 1.95, gz + oz, px, 3.9, pz, trimMat, { collide: false, cast: false });
+        this.box(gx + ox, 1.95, gz + oz, 0.5, 3.9, 0.5, m.trim, { collide: false, cast: false });
       }
       const [dx, dz] = w(5.1, 0.2);
-      this.box(gx, 1.85, gz, dx, 3.7, dz, darkMat, { collide: false, cast: false });
+      this.box(gx, 1.85, gz, dx, 3.7, dz, m.dark, { collide: false, cast: false });
       const [lx, lz] = w(4.6, 0.12);
       const inward = along ? [0, -0.3 * sgn] : [-0.3 * sgn, 0];
-      this.box(gx + inward[0], 3.55, gz + inward[1], lx, 0.1, lz, red, { collide: false, cast: false, receive: false });
-      this.gates.push({
+      this.lamp(gx + inward[0], 3.55, gz + inward[1], lx, 0.1, lz, m.red);
+      const gate = {
         pos: new THREE.Vector3(along ? 0 : (A - 2) * sgn, 0, along ? (A - 2) * sgn : 0),
         dir: new THREE.Vector3(along ? 0 : -sgn, 0, along ? -sgn : 0),
-      });
+      };
+      this.gates.push(gate);
+      const haz = this.deco(new THREE.PlaneGeometry(6, 1), m.hazard, 0, 0, 0, false);
+      haz.rotation.x = -Math.PI / 2;
+      if (gate.dir.x !== 0) haz.rotation.z = Math.PI / 2;
+      haz.position.copy(gate.pos).addScaledVector(gate.dir, 2.2).setY(0.012);
+      haz.receiveShadow = true;
     }
+  }
 
-    // Hazard markings in front of each gate
-    const hazard = makeHazardTexture();
-    hazard.repeat.set(3, 0.5);
-    const hazMat = new THREE.MeshStandardMaterial({ map: hazard, roughness: 0.7, metalness: 0.3, polygonOffset: true, polygonOffsetFactor: -2 });
-    for (const g of this.gates) {
-      const m = new THREE.Mesh(new THREE.PlaneGeometry(6, 1), hazMat);
-      m.rotation.x = -Math.PI / 2;
-      if (g.dir.x !== 0) m.rotation.z = Math.PI / 2;
-      m.position.copy(g.pos).addScaledVector(g.dir, 2.2).setY(0.012);
-      m.receiveShadow = true;
-      s.add(m);
-    }
+  private pillar(px: number, pz: number, strip: THREE.Material) {
+    const H = CEIL, m = this.m;
+    this.box(px, H / 2, pz, 2.4, H, 2.4, m.pillar, { tex: 2.4 });
+    this.box(px, 0.3, pz, 2.9, 0.6, 2.9, m.trim, { collide: false });
+    this.box(px, H - 0.5, pz, 2.9, 1, 2.9, m.trim, { collide: false, cast: false });
+    this.collision.add(px, 0.3, pz, 2.9, 0.6, 2.9);
+    for (const [ox, oz] of [[1.22, 0], [-1.22, 0], [0, 1.22], [0, -1.22]])
+      this.lamp(px + ox, 3.6, pz + oz, ox ? 0.05 : 0.14, 4.2, oz ? 0.05 : 0.14, strip);
+  }
 
-    // Central reactor
-    this.box(0, 0.5, 0, 3.4, 1, 3.4, trimMat);
-    this.box(0, 1.1, 0, 2.6, 0.2, 2.6, darkMat);
+  private buildReactor() {
+    const H = CEIL, m = this.m;
+    this.box(0, 0.5, 0, 3.4, 1, 3.4, m.trim);
+    this.box(0, 1.1, 0, 2.6, 0.2, 2.6, m.dark);
     this.collision.add(0, H / 2, 0, 1.5, H, 1.5);
-    const core = new THREE.Mesh(new THREE.CylinderGeometry(0.42, 0.42, H - 1.2, 20), cyan);
-    core.position.set(0, (H + 1.2) / 2, 0);
-    s.add(core);
+    this.deco(new THREE.CylinderGeometry(0.42, 0.42, H - 1.2, 20), m.core, 0, (H + 1.2) / 2, 0, false);
     const cage = new THREE.CylinderGeometry(0.06, 0.06, H - 1.2, 6);
     for (let i = 0; i < 6; i++) {
-      const a = (i / 6) * Math.PI * 2, bar = new THREE.Mesh(cage, darkMat);
-      bar.position.set(Math.cos(a) * 0.7, (H + 1.2) / 2, Math.sin(a) * 0.7);
-      bar.castShadow = true;
-      s.add(bar);
+      const a = (i / 6) * Math.PI * 2;
+      this.deco(cage, m.dark, Math.cos(a) * 0.7, (H + 1.2) / 2, Math.sin(a) * 0.7);
     }
-    for (const y of [2.6, 4.6, 6.6]) {
-      const ring = new THREE.Mesh(new THREE.CylinderGeometry(0.85, 0.85, 0.22, 20), trimMat);
-      ring.position.set(0, y, 0); ring.castShadow = true;
-      s.add(ring);
-    }
-    this.coreLight = new THREE.PointLight(0x48c8ff, 60, 26, 1.8);
-    this.coreLight.position.set(0, 3.2, 0);
-    s.add(this.coreLight);
+    for (const y of [2.6, 4.6, 6.6]) this.deco(new THREE.CylinderGeometry(0.85, 0.85, 0.22, 20), m.trim, 0, y, 0);
 
-    // Mirrored layout
     for (const qx of [1, -1]) for (const qz of [1, -1]) {
-      // Structural pillars with light strips
-      const px = 13 * qx, pz = 13 * qz;
-      this.box(px, H / 2, pz, 2.4, H, 2.4, pillarMat, { tex: 2.4 });
-      this.box(px, 0.3, pz, 2.9, 0.6, 2.9, trimMat, { collide: false });
-      this.box(px, H - 0.5, pz, 2.9, 1, 2.9, trimMat, { collide: false, cast: false });
-      this.collision.add(px, 0.3, pz, 2.9, 0.6, 2.9);
-      for (const [ox, oz] of [[1.22, 0], [-1.22, 0], [0, 1.22], [0, -1.22]])
-        this.box(px + ox, 3.6, pz + oz, ox ? 0.05 : 0.14, 4.2, oz ? 0.05 : 0.14, orange, { collide: false, cast: false, receive: false });
-
-      // Shipping containers near the walls
-      this.box(24 * qx, 1.3, 14 * qz, 2.6, 2.6, 6.2, qx * qz > 0 ? containerA : containerB, { tex: 2.6 });
-      this.box(14 * qx, 1.3, 24.5 * qz, 6.2, 2.6, 2.6, qx * qz > 0 ? containerB : containerA, { tex: 2.6 });
-
-      // Crate clusters
-      this.box(20.5 * qx, 1, 21 * qz, 2, 2, 2, crateMat, { tex: 2 });
-      this.box(22.4 * qx, 0.6, 20.2 * qz, 1.2, 1.2, 1.2, crateMat2, { tex: 1.2 });
-      this.box(20.5 * qx, 2.5, 21 * qz, 1, 1, 1, crateMat2, { tex: 1 });
-      this.box(6.5 * qx, 0.6, 19 * qz, 1.2, 1.2, 1.2, crateMat, { tex: 1.2 });
-      this.box(7.9 * qx, 0.5, 19.3 * qz, 1, 1, 1, crateMat2, { tex: 1 });
-      this.box(19 * qx, 0.75, 5.5 * qz, 1.5, 1.5, 1.5, crateMat, { tex: 1.5 });
-
-      // Low cover walls
-      this.box(7 * qx, 0.6, 6.5 * qz, 0.5, 1.2, 4.5, trimMat, { tex: 2 });
-      this.box(7 * qx, 1.23, 6.5 * qz, 0.6, 0.08, 4.6, darkMat, { collide: false });
+      this.pillar(13 * qx, 13 * qz, m.stripB);
+      this.box(24 * qx, 1.3, 14 * qz, 2.6, 2.6, 6.2, qx * qz > 0 ? m.contA : m.contB, { tex: 2.6 });
+      this.box(14 * qx, 1.3, 24.5 * qz, 6.2, 2.6, 2.6, qx * qz > 0 ? m.contB : m.contA, { tex: 2.6 });
+      this.box(20.5 * qx, 1, 21 * qz, 2, 2, 2, m.crate, { tex: 2 });
+      this.box(22.4 * qx, 0.6, 20.2 * qz, 1.2, 1.2, 1.2, m.crate2, { tex: 1.2 });
+      this.box(20.5 * qx, 2.5, 21 * qz, 1, 1, 1, m.crate2, { tex: 1 });
+      this.box(6.5 * qx, 0.6, 19 * qz, 1.2, 1.2, 1.2, m.crate, { tex: 1.2 });
+      this.box(7.9 * qx, 0.5, 19.3 * qz, 1, 1, 1, m.crate2, { tex: 1 });
+      this.box(19 * qx, 0.75, 5.5 * qz, 1.5, 1.5, 1.5, m.crate, { tex: 1.5 });
+      this.barrier(7 * qx, 6.5 * qz, 0.5, 4.5);
+      this.vents.push(new THREE.Vector3(13.2 * qx, H - 1.6, 13.2 * qz));
     }
-    for (const sgn of [1, -1]) {
-      this.box(0, 0.6, 12 * sgn, 5, 1.2, 0.5, trimMat, { tex: 2 });
-      this.box(0, 1.23, 12 * sgn, 5.1, 0.08, 0.6, darkMat, { collide: false });
-      this.box(18 * sgn, 0.6, 0, 0.5, 1.2, 5, trimMat, { tex: 2 });
-      this.box(18 * sgn, 1.23, 0, 0.6, 0.08, 5.1, darkMat, { collide: false });
-    }
+    for (const sgn of [1, -1]) { this.barrier(0, 12 * sgn, 5, 0.5); this.barrier(18 * sgn, 0, 0.5, 5); }
+  }
 
-    for (const [x, z] of [[22, 22], [-22, 22], [22, -22], [-22, -22]]) this.vents.push(new THREE.Vector3(x * 0.6, H - 1.6, z * 0.6));
-
-    // Lighting
-    s.add(new THREE.HemisphereLight(0x9db2cc, 0x3a332c, 1.0));
-    const sun = new THREE.DirectionalLight(0xdfe8ff, 1.5);
-    sun.position.set(14, 34, 9);
-    sun.castShadow = true;
-    const c = sun.shadow.camera;
-    c.left = -36; c.right = 36; c.top = 36; c.bottom = -36; c.near = 2; c.far = 60;
-    sun.shadow.bias = -0.0004; sun.shadow.normalBias = 0.04;
-    s.add(sun, sun.target);
-    this.sun = sun;
-    for (const [x, z, col] of [[19, 19, 0xffa55c], [-19, 19, 0x6fb6ff], [19, -19, 0x6fb6ff], [-19, -19, 0xffa55c]] as const) {
-      const l = new THREE.PointLight(col, 140, 36, 1.6);
-      l.position.set(x, 6.5, z);
-      s.add(l);
+  private buildFoundry() {
+    const H = CEIL, m = this.m;
+    // Central crucible of molten metal
+    this.collision.add(0, 1.1, 0, 4.6, 2.2, 4.6);
+    this.deco(new THREE.CylinderGeometry(2.7, 2.3, 2.2, 8), m.dark, 0, 1.1, 0).rotation.y = Math.PI / 8;
+    this.deco(new THREE.CylinderGeometry(2.9, 2.9, 0.25, 8), m.trim, 0, 2.15, 0).rotation.y = Math.PI / 8;
+    this.deco(new THREE.CylinderGeometry(2.35, 2.35, 0.06, 24), m.core, 0, 2.27, 0, false);
+    // Gantry crane over the crucible
+    this.box(0, 7.1, 0, 30, 0.7, 0.9, m.contA, { collide: false, cast: false });
+    this.box(0, 6.3, 0, 1.6, 0.9, 1.6, m.dark, { collide: false, cast: false });
+    this.deco(new THREE.CylinderGeometry(0.05, 0.05, 2.2, 6), m.dark, 0, 4.8, 0, false);
+    this.deco(new THREE.TorusGeometry(0.28, 0.07, 6, 12, Math.PI * 1.4), m.trim, 0, 3.55, 0, false);
+    // Glowing channels fed from the crucible (visual only)
+    for (const s of [1, -1]) {
+      this.lamp(s * 9.5, 0.012, 0, 14, 0.02, 0.5, m.core);
+      this.box(s * 9.5, 0.06, 0.42, 14, 0.12, 0.2, m.dark, { collide: false, cast: false });
+      this.box(s * 9.5, 0.06, -0.42, 14, 0.12, 0.2, m.dark, { collide: false, cast: false });
     }
-
-    // Floating dust for depth
-    const n = 500, pos = new Float32Array(n * 3);
-    for (let i = 0; i < n; i++) {
-      pos[i * 3] = (Math.random() - 0.5) * A * 2;
-      pos[i * 3 + 1] = Math.random() * H;
-      pos[i * 3 + 2] = (Math.random() - 0.5) * A * 2;
+    for (const qx of [1, -1]) for (const qz of [1, -1]) {
+      // Furnace with a glowing mouth and a stack to the ceiling
+      const fx = 15.5 * qx, fz = 21 * qz;
+      this.box(fx, 2, fz, 5, 4, 4, m.wall, { tex: 4 });
+      this.box(fx, 4.15, fz, 5.4, 0.3, 4.4, m.dark, { collide: false });
+      this.box(fx, 6.6, fz + 0.6 * qz, 1.6, 4.8, 1.6, m.dark, { tex: 1.6 });
+      this.lamp(fx, 1.3, fz - 2.03 * qz, 2.2, 1.4, 0.08, m.core);
+      this.box(fx, 2.2, fz - 2.06 * qz, 2.8, 0.3, 0.16, m.trim, { collide: false, cast: false });
+      for (const o of [-1.25, 1.25]) this.box(fx + o, 1.25, fz - 2.06 * qz, 0.3, 1.9, 0.16, m.trim, { collide: false, cast: false });
+      // Conveyor line with a gap in the middle of the hall
+      this.box(9 * qx, 0.5, 12 * qz, 10, 1.0, 1.6, m.trim, { tex: 2 });
+      this.box(9 * qx, 1.03, 12 * qz, 10, 0.06, 1.2, m.dark, { collide: false });
+      this.box(9.5 * qx, 1.3, 12 * qz, 1.6, 0.5, 0.9, m.crate, { tex: 1 });
+      // Ingot stacks and crates
+      this.box(8 * qx, 0.4, 6 * qz, 2.4, 0.8, 1.4, m.contA, { tex: 1.2 });
+      this.box(8 * qx, 1.0, 6 * qz, 1.6, 0.4, 1.0, m.contA, { tex: 1.2 });
+      this.box(22.5 * qx, 0.75, 7 * qz, 1.5, 1.5, 1.5, m.crate, { tex: 1.5 });
+      this.box(24 * qx, 0.5, 8.4 * qz, 1, 1, 1, m.crate2, { tex: 1 });
+      this.box(4.5 * qx, 0.6, 22 * qz, 1.2, 1.2, 1.2, m.crate, { tex: 1.2 });
+      this.pillar(23.5 * qx, 13.5 * qz, m.stripA);
+      this.vents.push(new THREE.Vector3(11 * qx, H - 1.6, 6 * qz));
     }
-    const dg = new THREE.BufferGeometry();
-    dg.setAttribute('position', new THREE.BufferAttribute(pos, 3));
-    this.dust = new THREE.Points(dg, new THREE.PointsMaterial({ color: 0x9fb4c8, size: 0.05, map: makeRadialTexture('rgba(255,255,255,1)', 'rgba(255,255,255,0)'), transparent: true, opacity: 0.4, depthWrite: false }));
-    s.add(this.dust);
+    for (const s of [1, -1]) this.barrier(17 * s, 0, 0.5, 6);
+  }
+
+  private buildVault() {
+    const H = CEIL, m = this.m;
+    // Data core
+    this.box(0, 0.4, 0, 3, 0.8, 3, m.trim);
+    this.collision.add(0, H / 2, 0, 1.6, H, 1.6);
+    this.deco(new THREE.CylinderGeometry(0.75, 0.75, H - 0.8, 6), m.dark, 0, (H + 0.8) / 2, 0);
+    for (let i = 0; i < 6; i++) {
+      const a = (i / 6) * Math.PI * 2 + Math.PI / 6;
+      this.deco(new THREE.BoxGeometry(0.1, H - 1.2, 0.36), m.core, Math.cos(a) * 0.68, (H + 0.8) / 2, Math.sin(a) * 0.68, false).rotation.y = -a;
+    }
+    // Server racks in rows, leaving a cross of corridors
+    for (const x of [-16, -11, -6, 6, 11, 16]) for (const z of [-19, -8, 8, 19]) {
+      this.box(x, 1.6, z, 1.2, 3.2, 7, m.dark, { tex: 1.6 });
+      this.box(x, 3.26, z, 1.3, 0.12, 7.1, m.trim, { collide: false });
+      for (const side of [-1, 1]) {
+        for (const [y, mat, len] of [[0.9, m.stripA, 6.2], [1.7, m.stripB, 4.6], [2.5, m.stripA, 6.2]] as const)
+          this.lamp(x + 0.61 * side, y, z + (y === 1.7 ? 0.6 * side : 0), 0.03, 0.05, len, mat);
+      }
+    }
+    // Overhead cable trays
+    for (const z of [-13.5, 13.5]) this.box(0, 7.6, z, 40, 0.2, 1.2, m.dark, { collide: false, cast: false });
+    for (const qx of [1, -1]) for (const qz of [1, -1]) {
+      // Cooling units in the corners
+      this.box(24.5 * qx, 1.2, 25 * qz, 3.4, 2.4, 3, m.wall, { tex: 3 });
+      this.lamp(24.5 * qx, 1.3, (25 - 1.53) * qz, 2.4, 0.9, 0.06, m.stripA);
+      this.box(23.5 * qx, 0.6, 3.6 * qz, 1.2, 1.2, 1.2, m.crate2, { tex: 1.2 });
+      this.barrier(22.5 * qx, 13.5 * qz, 3.5, 0.5);
+      this.vents.push(new THREE.Vector3(8.5 * qx, H - 1.6, 13.5 * qz));
+    }
+    for (const s of [1, -1]) this.barrier(0, 13.5 * s, 4, 0.5);
   }
 
   update(t: number) {
     this.dust.rotation.y = t * 0.012;
     this.dust.position.y = Math.sin(t * 0.2) * 0.25;
     const k = 0.75 + Math.sin(t * 2.4) * 0.25;
-    this.pulse[0].color.setRGB(3.6 * k, 0.25 * k, 0.15 * k);
-    const c = 0.9 + Math.sin(t * 5.1) * 0.06 + Math.sin(t * 13.7) * 0.04;
-    this.pulse[1].color.setRGB(0.3 * c, 2.2 * c, 3.2 * c);
-    this.coreLight.intensity = 60 * c;
+    this.m.red.color.setRGB(3.6 * k, 0.25 * k, 0.15 * k);
+    const c = 0.9 + Math.sin(t * 5.1) * 0.06 + Math.sin(t * 13.7) * 0.04, b = this.theme.core;
+    this.m.core.color.setRGB(b[0] * c, b[1] * c, b[2] * c);
+    this.coreLight.intensity = this.theme.coreI * c;
   }
 }

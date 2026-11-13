@@ -1,6 +1,7 @@
 import type { Input } from './input';
 import { ACTIONS, ACTION_LABELS, DIFFICULTY, applyTrackpadPreset, codeLabel, defaults, saveSettings, type Difficulty, type Settings } from './settings';
 import { WEAPONS, type WeaponSystem } from './weapons';
+import { ARENAS, type ArenaId } from './world';
 
 const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
 
@@ -43,8 +44,18 @@ export class UI {
     this.buildDifficulty();
   }
 
-  /** Difficulty picker on the title screen. */
+  /** Difficulty and arena pickers on the title screen. */
   private buildDifficulty() {
+    const ar = $('arena');
+    ar.innerHTML = '';
+    for (const id of Object.keys(ARENAS) as ArenaId[]) {
+      const b = document.createElement('button');
+      b.textContent = ARENAS[id].name;
+      b.classList.toggle('active', this.settings.arena === id);
+      b.addEventListener('click', () => { this.settings.arena = id; this.commit(); this.cb.click(); this.buildDifficulty(); });
+      ar.append(b);
+    }
+    $('arena-blurb').textContent = ARENAS[this.settings.arena]?.blurb ?? '';
     const el = $('difficulty');
     el.innerHTML = '';
     for (const d of Object.keys(DIFFICULTY) as Difficulty[]) {
@@ -237,8 +248,10 @@ export class UI {
 
   update(dt: number, d: {
     health: number; maxHealth: number; armor: number; maxArmor: number; wave: number; remaining: number; score: number;
-    weapons: WeaponSystem; spreadPx: number; ads: number; sprinting: boolean; fps: number; intermission: number;
+    weapons: WeaponSystem; spreadPx: number; ads: number; sprinting: boolean; fps: number; intermission: number; boss: number;
   }) {
+    $('boss').classList.toggle('hidden', d.boss < 0);
+    if (d.boss >= 0) $('boss-fill').style.width = Math.max(0, d.boss) * 100 + '%';
     const w = d.weapons, st = w.state;
     this.set('hp-num', Math.ceil(d.health));
     this.set('armor-num', Math.ceil(d.armor));

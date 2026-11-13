@@ -4,7 +4,7 @@ import type { Effects } from './effects';
 import type { CollisionWorld } from './physics';
 import type { Player } from './player';
 
-export type ProjKind = 'bolt' | 'rocket' | 'grenade';
+export type ProjKind = 'bolt' | 'rocket' | 'grenade' | 'shell';
 
 interface Proj {
   kind: ProjKind; mesh: THREE.Mesh; pos: THREE.Vector3; vel: THREE.Vector3;
@@ -45,6 +45,8 @@ export class Projectiles {
     make('bolt', 60, boltGeo, boltMat);
     make('rocket', 10, rocketGeo, rocketMat);
     make('grenade', 8, grenGeo, grenMat);
+    const shellGeo = new THREE.CylinderGeometry(0.05, 0.05, 0.16, 8); shellGeo.rotateX(Math.PI / 2);
+    make('shell', 12, shellGeo, new THREE.MeshStandardMaterial({ color: 0x3a3d33, metalness: 0.7, roughness: 0.4, emissive: 0xffb030, emissiveIntensity: 1.6 }));
   }
 
   spawn(kind: ProjKind, pos: THREE.Vector3, vel: THREE.Vector3, dmg: number) {
@@ -65,6 +67,7 @@ export class Projectiles {
       if (!p.active) continue;
       p.life -= dt;
       if (p.kind === 'grenade') p.vel.y -= 18 * dt;
+      else if (p.kind === 'shell') p.vel.y -= 7 * dt;
       const speed = p.vel.length(), step = speed * dt;
       let done = false;
       if (speed > 1e-4) {
@@ -79,12 +82,17 @@ export class Projectiles {
           } else {
             p.pos.copy(hit.point).addScaledVector(hit.normal, 0.05);
             if (p.kind === 'rocket') c.explode(p.pos, 4.5, 0, p.dmg);
+            else if (p.kind === 'shell') c.explode(p.pos, 4.6, p.dmg, 26);
             else c.effects.sparks(p.pos, hit.normal, 5, 4, 1.2, 0.3);
             done = true;
           }
         } else {
           // Segment vs player body.
-          if (p.kind !== 'grenade') {
+          if (p.kind === 'shell') {
+            // Launcher shells burst on contact with a robot.
+            p.pos.addScaledVector(dir, step);
+            if (c.enemyNear(p.pos, 0.35)) { c.explode(p.pos, 4.6, p.dmg, 26); done = true; }
+          } else if (p.kind !== 'grenade') {
             const my = pl.pos.y + pl.height * 0.5;
             tmp.set(pl.pos.x, my, pl.pos.z).sub(p.pos);
             const t = Math.max(0, Math.min(step, tmp.dot(dir)));
@@ -98,11 +106,12 @@ export class Projectiles {
           } else if (c.enemyNear(p.pos, 0.9)) {
             p.life = 0;
           }
-          if (!done) p.pos.addScaledVector(dir, step);
+          if (!done && p.kind !== 'shell') p.pos.addScaledVector(dir, step);
         }
       }
       if (!done && p.life <= 0) {
         if (p.kind === 'grenade') c.explode(p.pos, 6.5, p.dmg, 35);
+        else if (p.kind === 'shell') c.explode(p.pos, 4.6, p.dmg, 26);
         done = true;
       }
       if (done) { p.active = false; p.mesh.visible = false; continue; }
@@ -111,9 +120,54 @@ export class Projectiles {
       p.trail -= dt;
       if (p.trail <= 0) {
         if (p.kind === 'rocket') { p.trail = 0.02; c.effects.trail(p.pos, 3, 1.2, 0.3, 0.3); if (Math.random() < 0.5) c.effects.puff(p.pos, 1, 0.4, 0.25); }
+        else if (p.kind === 'shell') { p.trail = 0.02; c.effects.trail(p.pos, 2.4, 1.4, 0.3, 0.16); }
         else if (p.kind === 'bolt') { p.trail = 0.03; c.effects.trail(p.pos, 2.5, 0.8, 0.15, 0.14); }
         else { p.trail = 0.05; c.effects.trail(p.pos, 0.3, 2, 0.6, 0.1); }
       }
+    }
+  }
+}
+
+interface Wave { mesh: THREE.Mesh; mat: THREE.MeshBasicMaterial; r: number; dmg: number; active: boolean; hit: boolean; }
+
+/** Expanding rings along the floor. Jump to let one pass underneath. */
+export class Shockwaves {
+  private list: Wave[] = [];
+  private static SPEED = 11;
+  private static MAX = 40;
+
+  constructor(scene: THREE.Scene) {
+    const geo = new THREE.RingGeometry(0.93, 1, 72);
+    geo.rotateX(-Math.PI / 2);
+    for (let i = 0; i < 3; i++) {
+      const mat = new THREE.MeshBasicMaterial({ transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide });
+      const mesh = new THREE.Mesh(geo, mat);
+      mesh.visible = false;
+      scene.add(mesh);
+      this.list.push({ mesh, mat, r: 0, dmg: 0, active: false, hit: false });
+    }
+  }
+
+  spawn(x: number, z: number, dmg: number) {
+    const w = this.list.find((q) => !q.active);
+    if (!w) return;
+    w.active = true; w.hit = false; w.r = 1.5; w.dmg = dmg;
+    w.mesh.position.set(x, 0.12, z);
+    w.mesh.visible = true;
+  }
+
+  clear() { for (const w of this.list) { w.active = false; w.mesh.visible = false; } }
+
+  update(dt: number, player: Player, hurt: (amount: number, from: THREE.Vector3) => void) {
+    for (const w of this.list) {
+      if (!w.active) continue;
+      w.r += Shockwaves.SPEED * dt;
+      const k = 1 - w.r / Shockwaves.MAX;
+      w.mesh.scale.set(w.r, 1, w.r);
+      w.mat.color.setRGB(5 * k, 1.6 * k, 0.3 * k);
+      const d = Math.hypot(player.pos.x - w.mesh.position.x, player.pos.z - w.mesh.position.z);
+      if (!w.hit && Math.abs(d - w.r) < 0.6 && player.pos.y < 0.45) { w.hit = true; hurt(w.dmg * Math.max(0.4, k), w.mesh.position); }
+      if (w.r >= Shockwaves.MAX) { w.active = false; w.mesh.visible = false; }
     }
   }
 }

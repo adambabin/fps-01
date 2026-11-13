@@ -12,7 +12,11 @@ export class FlowField {
   private blocked = new Uint8Array(SIZE * SIZE);
   private queue = new Int32Array(SIZE * SIZE);
 
-  constructor(world: CollisionWorld) {
+  constructor(world: CollisionWorld) { this.rebuild(world); }
+
+  /** Recomputes blocked cells; call after the arena's collision boxes change. */
+  rebuild(world: CollisionWorld) {
+    this.blocked.fill(0);
     const pad = 0.55;
     for (const b of world.boxes) {
       if (b.min.y > 1.2 || b.max.y < 0.25) continue;

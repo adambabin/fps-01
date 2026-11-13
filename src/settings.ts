@@ -1,6 +1,6 @@
 export const ACTIONS = [
   'forward', 'back', 'left', 'right', 'jump', 'sprint', 'crouch',
-  'fire', 'ads', 'reload', 'grenade',
+  'fire', 'ads', 'reload', 'grenade', 'melee',
   'weapon1', 'weapon2', 'weapon3', 'weapon4', 'weapon5', 'weapon6', 'nextWeapon', 'pause',
 ] as const;
 export type Action = (typeof ACTIONS)[number];
@@ -8,7 +8,7 @@ export type Action = (typeof ACTIONS)[number];
 export const ACTION_LABELS: Record<Action, string> = {
   forward: 'Move forward', back: 'Move back', left: 'Strafe left', right: 'Strafe right',
   jump: 'Jump', sprint: 'Sprint', crouch: 'Crouch',
-  fire: 'Fire', ads: 'Aim down sights', reload: 'Reload', grenade: 'Throw grenade',
+  fire: 'Fire', ads: 'Aim down sights', reload: 'Reload', grenade: 'Throw grenade', melee: 'Melee',
   weapon1: 'Weapon 1', weapon2: 'Weapon 2', weapon3: 'Weapon 3', weapon4: 'Weapon 4', weapon5: 'Weapon 5', weapon6: 'Weapon 6',
   nextWeapon: 'Next weapon', pause: 'Pause',
 };
@@ -49,7 +49,7 @@ export function defaultBinds(): Record<Action, string[]> {
     forward: ['KeyW', 'ArrowUp'], back: ['KeyS', 'ArrowDown'],
     left: ['KeyA', 'ArrowLeft'], right: ['KeyD', 'ArrowRight'],
     jump: ['Space'], sprint: ['ShiftLeft', 'ShiftRight'], crouch: ['KeyC', 'ControlLeft'],
-    fire: ['Mouse0', 'KeyF'], ads: ['Mouse2', 'KeyQ'], reload: ['KeyR'], grenade: ['KeyG'],
+    fire: ['Mouse0', 'KeyF'], ads: ['Mouse2', 'KeyQ'], reload: ['KeyR'], grenade: ['KeyG'], melee: ['KeyV', 'Mouse1'],
     weapon1: ['Digit1'], weapon2: ['Digit2'], weapon3: ['Digit3'], weapon4: ['Digit4'], weapon5: ['Digit5'], weapon6: ['Digit6'],
     nextWeapon: ['KeyE'], pause: ['KeyP'],
   };

@@ -187,6 +187,17 @@ export class AudioSys {
     this.noise({ gain: sprint ? 0.11 : 0.07, dur: 0.07, freq: 500 + Math.random() * 250, freqEnd: 140 });
     this.tone({ gain: 0.05, dur: 0.05, freq: 95, freqEnd: 55 });
   }
+  swing() { this.noise({ gain: 0.22, dur: 0.16, freq: 500, freqEnd: 2400, type: 'bandpass', q: 1.2 }); }
+  meleeHit() {
+    this.noise({ gain: 0.6, dur: 0.1, freq: 2600, freqEnd: 500 });
+    this.tone({ gain: 0.5, dur: 0.14, freq: 160, freqEnd: 60 });
+    this.tone({ gain: 0.2, dur: 0.22, freq: 1250, freqEnd: 900, type: 'triangle' });
+  }
+  slide() { this.noise({ gain: 0.22, dur: 0.6, freq: 1500, freqEnd: 350, type: 'bandpass', q: 0.8, attack: 0.03 }); }
+  objective(done: boolean) {
+    const notes = done ? [523, 784, 1047, 1319] : [330, 262];
+    notes.forEach((f, i) => this.tone({ gain: 0.2, dur: 0.3, freq: f, type: 'triangle', delay: i * 0.09 }));
+  }
   jump() { this.noise({ gain: 0.08, dur: 0.1, freq: 700, freqEnd: 300 }); }
   land(hard: number) {
     this.noise({ gain: 0.1 + hard * 0.2, dur: 0.14, freq: 600, freqEnd: 110 });

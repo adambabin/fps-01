@@ -26,6 +26,13 @@ export class Player {
   grounded = true;
   crouching = false;
   sprinting = false;
+  /** True during a slide: started by crouching while sprinting. */
+  sliding = false;
+  private slideT = 0;
+  private slideCd = 0;
+  private slideSpeed = 0;
+  private sdx = 0;
+  private sdz = 0;
   height = STAND;
   /** Seconds since the last hit taken. */
   sinceHit = 99;
@@ -50,6 +57,7 @@ export class Player {
     this.maxHealth = 100; this.health = 100; this.armor = 0; this.maxArmor = 100;
     this.speedMult = 1; this.regen = 0; this.sinceHit = 99; this.shake = 0;
     this.crouching = false; this.height = STAND; this.crouchT = 0; this.landDip = 0;
+    this.sliding = false; this.slideCd = 0;
   }
 
   get eye(): number { return 1.62 + (1.0 - 1.62) * this.crouchT - this.landDip; }
@@ -80,8 +88,19 @@ export class Player {
     const rec = Math.exp(-(wantsFire ? 4.5 : 11) * dt);
     this.recoilPitch *= rec; this.recoilYaw *= rec;
 
+    // Slide: crouch while sprinting. Carries momentum, keeps a low profile, and can be
+    // cancelled into a jump.
+    this.slideCd -= dt;
+    if (input.wasPressed('crouch') && this.sprinting && this.grounded && this.slideCd <= 0) {
+      const hs0 = Math.hypot(this.vel.x, this.vel.z) || 1;
+      this.sliding = true; this.slideT = 0.85;
+      this.sdx = this.vel.x / hs0; this.sdz = this.vel.z / hs0;
+      this.slideSpeed = Math.max(hs0, SPRINT * this.speedMult) * 1.38;
+      this.audio.slide();
+    }
+
     // Crouch
-    const wantCrouch = input.isDown('crouch');
+    const wantCrouch = input.isDown('crouch') || this.sliding;
     if (wantCrouch && !this.crouching) { this.crouching = true; this.height = CROUCH; }
     else if (!wantCrouch && this.crouching) {
       this.h.set(RADIUS, STAND / 2 - 0.02, RADIUS);
@@ -98,12 +117,28 @@ export class Player {
     const wl = Math.hypot(wx, wz);
     if (wl > 0) { wx /= wl; wz /= wl; }
 
+    if (this.sliding) {
+      this.slideT -= dt;
+      this.slideSpeed -= 7.5 * dt;
+      // A little steering, then the slide's own velocity replaces normal ground movement.
+      this.sdx += wx * 1.6 * dt; this.sdz += wz * 1.6 * dt;
+      const sl = Math.hypot(this.sdx, this.sdz) || 1;
+      this.sdx /= sl; this.sdz /= sl;
+      const moving = Math.hypot(this.vel.x, this.vel.z);
+      const released = !input.isDown('crouch') && this.slideT < 0.55;
+      if (this.slideT <= 0 || this.slideSpeed < 3.6 || released || !this.grounded || (this.slideT < 0.75 && moving < this.slideSpeed * 0.4)) {
+        this.sliding = false; this.slideCd = 0.35;
+      } else { this.vel.x = this.sdx * this.slideSpeed; this.vel.z = this.sdz * this.slideSpeed; }
+    }
+
     this.sprinting = input.isDown('sprint') && f > 0 && !this.crouching && ads < 0.2 && !wantsFire && this.grounded;
     let speed = this.crouching ? CROUCH_SPEED : this.sprinting ? SPRINT : WALK;
     if (ads > 0.5) speed = Math.min(speed, ADS_SPEED);
     speed *= this.speedMult;
 
-    if (this.grounded) {
+    if (this.sliding) {
+      // handled above
+    } else if (this.grounded) {
       const k = Math.min(1, dt * (wl > 0 ? 11 : 14));
       this.vel.x += (wx * speed - this.vel.x) * k;
       this.vel.z += (wz * speed - this.vel.z) * k;
@@ -155,7 +190,7 @@ export class Player {
     }
     this.landDip *= Math.exp(-9 * dt);
     this.shake *= Math.exp(-5 * dt);
-    this.roll += (-r * 0.012 * (this.grounded ? 1 : 0.3) - this.roll) * Math.min(1, dt * 8);
+    this.roll += ((this.sliding ? 0.07 : -r * 0.012 * (this.grounded ? 1 : 0.3)) - this.roll) * Math.min(1, dt * 8);
     this.sinceHit += dt;
     if (this.sinceHit > 5 && this.health > 0) {
       if (this.regen > 0) this.health = Math.min(this.maxHealth, this.health + this.regen * dt);

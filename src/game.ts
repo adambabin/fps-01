@@ -10,6 +10,7 @@ import { ENEMY_DEFS, EnemyManager, type Enemy, type EnemyCtx, type EnemyType } f
 import { PICKUP_AMMO, PICKUP_ARMOR, PICKUP_GRENADE, PICKUP_HEALTH, Pickups, Projectiles, Shockwaves, type ProjCtx } from './entities';
 import { Input } from './input';
 import { FlowField } from './nav';
+import { Objectives, type KillSource } from './objectives';
 import { Player } from './player';
 import { DIFFICULTY, loadHighScore, loadSettings, saveHighScore, type Settings } from './settings';
 import { UI, type Card, type RadarBlip } from './ui';
@@ -46,6 +47,7 @@ const UPGRADES: Upgrade[] = [
   { name: 'Deep pockets', desc: '+50% reserve ammo and a full resupply.', apply: (g) => { g.weapons.mods.reserve *= 1.5; g.weapons.addAmmo(1); } },
   { name: 'Bandolier', desc: 'Carry one more grenade and refill them.', apply: (g) => { g.weapons.maxGrenades++; g.weapons.grenades = g.weapons.maxGrenades; } },
   { name: 'Salvage protocol', desc: 'Each robot destroyed restores 3 health.', ok: (g) => g.lifesteal < 9, apply: (g) => (g.lifesteal += 3) },
+  { name: 'Shock gauntlet', desc: '+75% melee damage, and melee kills restore 15 armor.', ok: (g) => g.weapons.mods.melee < 3, apply: (g) => { g.weapons.mods.melee += 0.75; g.meleeArmor += 15; } },
   { name: 'Nanite weave', desc: 'Regenerate 3 health per second after 5 seconds without damage.', ok: (g) => g.player.regen < 9, apply: (g) => (g.player.regen += 3) },
 ];
 
@@ -75,6 +77,13 @@ export class Game {
   score = 0;
   kills = 0;
   lifesteal = 0;
+  /** Armor restored by each melee kill (Shock gauntlet upgrade). */
+  meleeArmor = 0;
+  objectives: Objectives;
+  /** How the damage currently being applied was dealt; read when a kill is scored. */
+  private hitSource: KillSource = 'bullet';
+  /** Set by a completed objective: the next upgrade screen offers one more card. */
+  private bonusCard = false;
   private composer!: EffectComposer;
   private bloom!: UnrealBloomPass;
   private queue: EnemyType[] = [];
@@ -112,6 +121,7 @@ export class Game {
     this.projectiles = new Projectiles(this.scene);
     this.pickups = new Pickups(this.scene);
     this.shockwaves = new Shockwaves(this.scene);
+    this.objectives = new Objectives(this.scene);
     // Faint light carried by the player so nearby surfaces never go fully black.
     this.camera.add(new THREE.PointLight(0xcfe0ff, 5, 13, 1.5));
     this.scene.add(this.camera);
@@ -145,6 +155,7 @@ export class Game {
       world: this.world.collision, enemies: this.enemies, effects: this.effects, audio: this.audio, camera: this.camera,
       hitEnemy: (e, dmg, crit, point, dir) => this.hitEnemy(e, dmg, crit, point, dir),
       launch: (pos, vel, dmg) => this.projectiles.spawn('shell', pos, vel, dmg),
+      melee: (dmg) => this.melee(dmg),
     };
 
     this.input.lookActive = () => this.state === 'playing' && this.locked();
@@ -154,7 +165,7 @@ export class Game {
     document.addEventListener('pointerlockerror', () => { if (this.state === 'playing' && !this.locked()) this.pause(); });
     canvas.addEventListener('click', () => { if (this.state === 'playing' && !this.locked()) this.requestLock(); });
     window.addEventListener('keydown', (e) => {
-      if (this.state === 'upgrade' && ['Digit1', 'Digit2', 'Digit3'].includes(e.code)) this.pickUpgrade(Number(e.code.slice(5)) - 1);
+      if (this.state === 'upgrade' && ['Digit1', 'Digit2', 'Digit3', 'Digit4'].includes(e.code)) this.pickUpgrade(Number(e.code.slice(5)) - 1);
     });
     window.addEventListener('resize', () => this.resize());
     document.addEventListener('visibilitychange', () => { if (document.hidden && this.state === 'playing') this.pause(); });
@@ -251,6 +262,7 @@ export class Game {
     this.player.reset(); this.weapons.reset();
     this.applyDifficulty();
     this.wave = 0; this.score = 0; this.kills = 0; this.lifesteal = 0; this.runTime = 0;
+    this.meleeArmor = 0; this.bonusCard = false; this.objectives.clear();
     this.queue = []; this.clearT = 0; this.intermission = 2.5;
     this.state = 'playing';
     this.weapons.scene.visible = true;
@@ -277,6 +289,7 @@ export class Game {
 
   private toMenu() {
     this.state = 'menu';
+    this.objectives.clear(); this.ui.objective(null, null);
     this.enemies.clear(); this.projectiles.clear(); this.pickups.clear(); this.effects.clear(); this.shockwaves.clear(); this.boss = null;
     this.weapons.scene.visible = false;
     this.ui.showHud(false); this.ui.show('menu');
@@ -303,6 +316,12 @@ export class Game {
     }
     this.queue = q;
     this.spawnT = 1;
+    // A side objective from wave 2 on; boss waves are their own objective.
+    if (bossWave || w < 2) this.objectives.clear();
+    else {
+      this.objectives.start(w, this.openSpot(), this.weapons.grenades > 0 || this.weapons.states[5].unlocked);
+      this.ui.feed(`Objective: <b>${this.objectives.current!.title}</b>`);
+    }
     if (bossWave) { this.ui.announce('WARNING', 'WARDEN INBOUND', 3); this.audio.alarm(); }
     else { this.ui.announce('WAVE ' + w, `${q.length} HOSTILES`); this.audio.waveStart(); }
   }
@@ -324,6 +343,11 @@ export class Game {
       const g = (gates.length ? gates : this.world.gates)[(Math.random() * (gates.length || 4)) | 0];
       tmpA.copy(g.pos).addScaledVector(tmpB.set(-g.dir.z, 0, g.dir.x), (Math.random() - 0.5) * 3.6);
       const e = this.enemies.spawn(type, tmpA, hp, dmg);
+      if (this.objectives.wantsPrime && type !== 'scuttler') {
+        // The Prime unit: tougher, worth more, and marked for the objective.
+        e.hp = e.maxHp = e.maxHp * 2.2;
+        this.objectives.setPrime(e);
+      }
       e.yaw = Math.atan2(g.dir.x, g.dir.z);
       e.vel.copy(g.dir).multiplyScalar(e.def.speed);
     }
@@ -332,6 +356,7 @@ export class Game {
   private waveCleared() {
     const bonus = 100 * this.wave;
     this.score += bonus;
+    if (this.objectives.fail()) this.ui.feed('Objective missed');
     this.audio.waveClear();
     this.ui.announce('WAVE CLEARED', `+${bonus} BONUS`, 1.6);
     this.clearT = 1.6;
@@ -347,7 +372,9 @@ export class Game {
       offers.push({ name: w.name, weapon: true, desc: w.pitch ?? '', apply: (g) => g.weapons.unlock(i) });
     }
     const pool = UPGRADES.filter((u) => !u.ok || u.ok(this));
-    while (offers.length < 3 && pool.length) offers.push(pool.splice((Math.random() * pool.length) | 0, 1)[0]);
+    const count = this.bonusCard ? 4 : 3;
+    this.bonusCard = false;
+    while (offers.length < count && pool.length) offers.push(pool.splice((Math.random() * pool.length) | 0, 1)[0]);
     this.offers = offers;
     this.state = 'upgrade';
     this.input.reset();
@@ -397,6 +424,47 @@ export class Game {
     if (this.player.dead) this.gameOver();
   }
 
+  /** A free floor position away from the player, for objective zones. */
+  private openSpot(): THREE.Vector3 | null {
+    const h = new THREE.Vector3(2.2, 0.9, 2.2);
+    for (let i = 0; i < 40; i++) {
+      tmpA.set((Math.random() - 0.5) * 44, 1, (Math.random() - 0.5) * 44);
+      if (tmpA.distanceTo(this.player.pos) < 10 || this.world.collision.overlaps(tmpA, h)) continue;
+      return tmpA.clone().setY(0);
+    }
+    return null;
+  }
+
+  private objectiveDone() {
+    const bonus = 150 * this.wave, p = this.player;
+    this.score += bonus;
+    this.bonusCard = true;
+    this.audio.objective(true);
+    this.ui.announce('OBJECTIVE COMPLETE', `+${bonus} · SUPPLY DROP · EXTRA UPGRADE CHOICE`, 2.4);
+    [PICKUP_HEALTH, PICKUP_AMMO, PICKUP_ARMOR].forEach((k, i) => {
+      const a = p.yaw + (i - 1) * 0.7;
+      this.pickups.spawn(k, tmpA.set(p.pos.x - Math.sin(a) * 2.2, 0.5, p.pos.z - Math.cos(a) * 2.2));
+    });
+  }
+
+  /** Strikes every robot in a short cone in front of the camera. */
+  private melee(dmg: number): boolean {
+    this.camera.getWorldDirection(tmpB);
+    let any = false;
+    this.hitSource = 'melee';
+    for (const e of [...this.enemies.list]) {
+      const c = e.center(tmpA).sub(this.camera.position), d = c.length();
+      if (d - e.def.radius > 2.3 || c.dot(tmpB) / (d || 1) < 0.5) continue;
+      any = true;
+      const point = e.center(new THREE.Vector3()).addScaledVector(tmpB, -e.def.radius * 0.8);
+      this.effects.sparks(point, tmpC.copy(tmpB).negate(), 12, 3.4, 2.4, 1);
+      if (e.type !== 'heavy' && e.type !== 'boss') e.vel.addScaledVector(tmpB, 7);
+      this.hitEnemy(e, dmg, false, point, tmpB);
+    }
+    this.hitSource = 'bullet';
+    return any;
+  }
+
   private hitEnemy(e: Enemy, dmg: number, crit: boolean, point: THREE.Vector3, dir: THREE.Vector3) {
     const killed = this.enemies.damage(e, dmg, crit, this.enemyCtx, dir);
     this.ui.hitmarker(crit, killed);
@@ -407,9 +475,16 @@ export class Game {
 
   private onKill(e: Enemy, crit: boolean) {
     this.kills++;
-    const pts = Math.round(e.def.score * (crit ? 1.25 : 1));
+    const src = this.hitSource, prime = e === this.objectives.prime;
+    const pts = Math.round(e.def.score * (crit ? 1.25 : 1) * (src === 'melee' ? 1.25 : 1) * (prime ? 3 : 1));
     this.score += pts;
-    this.ui.feed(`${e.def.name} destroyed <b>+${pts}</b>${crit ? ' · WEAK POINT' : ''}`);
+    this.ui.feed(`${prime ? 'Prime ' : ''}${e.def.name} destroyed <b>+${pts}</b>${crit ? ' · WEAK POINT' : src === 'melee' ? ' · MELEE' : ''}`);
+    if (this.objectives.onKill(e, src, crit)) this.objectiveDone();
+    if (src === 'melee') {
+      // Melee kills always shake something loose.
+      if (this.meleeArmor) this.player.armor = Math.min(this.player.maxArmor, this.player.armor + this.meleeArmor);
+      this.pickups.spawn(this.player.health < this.player.maxHealth * 0.6 ? PICKUP_HEALTH : PICKUP_AMMO, tmpA.set(e.pos.x, 0.5, e.pos.z));
+    }
     if (this.lifesteal) this.player.health = Math.min(this.player.maxHealth, this.player.health + this.lifesteal);
     const p = e.center(tmpC).clone();
     p.y = 0.5;
@@ -443,10 +518,12 @@ export class Game {
     this.effects.explosion(pos, radius / 5);
     this.audio.explosion(pos, true);
     if (dmgEnemy > 0) {
+      this.hitSource = 'blast';
       for (const e of [...this.enemies.list]) {
         const c = e.center(tmpA), d = Math.max(0, c.distanceTo(pos) - e.def.radius);
         if (d < radius) this.hitEnemy(e, dmgEnemy * (1 - d / radius) ** 0.8, false, c.clone(), tmpB.subVectors(c, pos).normalize());
       }
+      this.hitSource = 'bullet';
     }
     const pc = tmpA.set(this.player.pos.x, this.player.pos.y + this.player.height / 2, this.player.pos.z);
     const d = pc.distanceTo(pos);
@@ -499,7 +576,7 @@ export class Game {
 
     p.update(dt, input, this.settings, w.ads, w.wantsFire, w.def.zoom);
     const e = w.ads * w.ads * (3 - 2 * w.ads);
-    const base = this.settings.fov + (p.sprinting ? 4 : 0);
+    const base = this.settings.fov + (p.sprinting ? 4 : p.sliding ? 7 : 0);
     // Zoom is applied to the tangent so it feels the same at any base FOV.
     const fov = (2 * Math.atan(Math.tan((base * Math.PI) / 360) / (1 + (w.def.zoom - 1) * e)) * 180) / Math.PI;
     this.setFov(this.camera.fov + (fov - this.camera.fov) * Math.min(1, dt * 18));
@@ -524,6 +601,9 @@ export class Game {
     this.projectiles.update(dt, this.projCtx);
     this.pickups.update(dt, p, (k) => this.collect(k));
     this.shockwaves.update(dt, p, (a, from) => this.hurtPlayer(a, from));
+    const res = this.objectives.update(dt, p);
+    if (res === 'done') this.objectiveDone();
+    else if (res === 'failed') { this.audio.objective(false); this.ui.feed('Objective missed'); }
     this.effects.update(dt);
     if (this.state !== 'playing') return;
 
@@ -561,6 +641,22 @@ export class Game {
       const dx = en.pos.x - p.pos.x, dz = en.pos.z - p.pos.z;
       blips.push({ x: dx * cy - dz * sy, z: -dx * sy - dz * cy, kind: en.type === 'heavy' || en.type === 'boss' ? 3 : en.type === 'drone' ? 2 : 1 });
     }
+    const obj = this.objectives.current;
+    if (obj && obj.pos) blips.push({ x: (obj.pos.x - p.pos.x) * cy - (obj.pos.z - p.pos.z) * sy, z: -(obj.pos.x - p.pos.x) * sy - (obj.pos.z - p.pos.z) * cy, kind: 9 });
     this.ui.drawRadar(blips);
+    // Objective panel and on-screen waypoint
+    let wp: { x: number; y: number; dist: number } | null = null;
+    if (obj && obj.pos) {
+      tmpB.copy(obj.pos).setY(obj.pos.y + (obj.kind === 'hold' ? 1.6 : 1.2));
+      const dist = tmpB.distanceTo(this.camera.position);
+      tmpB.project(this.camera);
+      let x = tmpB.x, y = tmpB.y;
+      const behind = tmpB.z > 1;
+      if (behind) { x = -x; y = -y; }
+      const k = Math.max(Math.abs(x) / 0.9, Math.abs(y) / 0.82);
+      if (behind || k > 1) { x /= k || 1; y /= k || 1; }
+      wp = { x: (x * 0.5 + 0.5) * window.innerWidth, y: (-y * 0.5 + 0.5) * h, dist };
+    }
+    this.ui.objective(obj, wp);
   }
 }

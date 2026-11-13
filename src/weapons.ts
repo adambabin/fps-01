@@ -60,7 +60,7 @@ export const WEAPONS: WeaponDef[] = [
 
 export interface WeaponState { ammo: number; reserve: number; unlocked: boolean; }
 
-export interface Mods { damage: number; fireRate: number; mag: number; reload: number; crit: number; reserve: number; }
+export interface Mods { damage: number; fireRate: number; mag: number; reload: number; crit: number; reserve: number; melee: number; }
 
 export interface FireCtx {
   world: CollisionWorld; enemies: EnemyManager; effects: Effects; audio: AudioSys;
@@ -68,7 +68,11 @@ export interface FireCtx {
   hitEnemy(e: Enemy, dmg: number, crit: boolean, point: THREE.Vector3, dir: THREE.Vector3): void;
   /** Fires a launcher shell. */
   launch(pos: THREE.Vector3, vel: THREE.Vector3, dmg: number): void;
+  /** Strikes robots in a short cone ahead. Returns true if anything was hit. */
+  melee(dmg: number): boolean;
 }
+
+const MELEE_TIME = 0.5, MELEE_DAMAGE = 90;
 
 const fwd = new THREE.Vector3(), right = new THREE.Vector3(), up = new THREE.Vector3(), dirv = new THREE.Vector3();
 const start = new THREE.Vector3(), end = new THREE.Vector3();
@@ -86,9 +90,12 @@ export class WeaponSystem {
   reloadDur = 1;
   grenades = 2;
   maxGrenades = 2;
-  mods: Mods = { damage: 1, fireRate: 1, mag: 1, reload: 1, crit: 1, reserve: 1 };
+  mods: Mods = { damage: 1, fireRate: 1, mag: 1, reload: 1, crit: 1, reserve: 1, melee: 1 };
   /** True on frames where the trigger is held or buffered. */
   wantsFire = false;
+  /** Counts down through a melee swing; the hit lands part-way through. */
+  meleeT = 0;
+  private meleeDone = true;
   private adsHeld = false;
   private cooldown = 0;
   private heat = 0;
@@ -134,9 +141,9 @@ export class WeaponSystem {
 
   reset() {
     this.states = WEAPONS.map((w, i) => ({ ammo: w.mag, reserve: w.reserve, unlocked: i < 2 }));
-    this.mods = { damage: 1, fireRate: 1, mag: 1, reload: 1, crit: 1, reserve: 1 };
+    this.mods = { damage: 1, fireRate: 1, mag: 1, reload: 1, crit: 1, reserve: 1, melee: 1 };
     this.current = 1; this.pending = -1; this.switchT = 0;
-    this.reloadT = 0; this.cooldown = 0; this.heat = 0; this.ads = 0; this.adsHeld = false;
+    this.reloadT = 0; this.cooldown = 0; this.heat = 0; this.ads = 0; this.adsHeld = false; this.meleeT = 0;
     this.grenades = this.maxGrenades = 2;
     this.guns.forEach((g, i) => (g.group.visible = i === this.current));
   }
@@ -216,7 +223,19 @@ export class WeaponSystem {
         c.audio.swap();
       }
     }
-    const busy = this.switchT > 0;
+    // Melee: a fast strike with the weapon that interrupts reloading and aiming.
+    if (input.wasPressed('melee') && this.meleeT <= 0 && this.switchT <= 0) {
+      this.meleeT = MELEE_TIME; this.meleeDone = false; this.reloadT = 0;
+      c.audio.swing();
+    }
+    if (this.meleeT > 0) {
+      this.meleeT -= dt;
+      if (!this.meleeDone && this.meleeT <= MELEE_TIME - 0.13) {
+        this.meleeDone = true;
+        if (c.melee(MELEE_DAMAGE * this.mods.melee)) { c.audio.meleeHit(); player.shake = Math.min(1, player.shake + 0.25); }
+      }
+    }
+    const busy = this.switchT > 0 || this.meleeT > 0;
 
     // Aim
     if (settings.adsToggle) { if (input.wasPressed('ads')) this.adsHeld = !this.adsHeld; }
@@ -366,6 +385,12 @@ export class WeaponSystem {
       const sm = env * env * (3 - 2 * env);
       y -= sm * 0.12; rx += sm * 0.5; rz += sm * 0.45; x -= sm * 0.03;
       y += Math.sin(p * Math.PI * 4) * 0.008 * sm;
+    }
+    // Melee: swing the weapon across and forward, then recover.
+    if (this.meleeT > 0) {
+      const p = 1 - this.meleeT / MELEE_TIME;
+      const env = p < 0.26 ? p / 0.26 : 1 - (p - 0.26) / 0.74, m = env * env * (3 - 2 * env);
+      x -= m * 0.08; y += m * 0.03; z -= m * 0.15; ry += m * 0.8; rz -= m * 0.5; rx += m * 0.12;
     }
     // Swap: drop below the frame and come back.
     if (this.switchT > 0) {

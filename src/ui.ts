@@ -1,5 +1,6 @@
 import type { Input } from './input';
 import { ACTIONS, ACTION_LABELS, DIFFICULTY, applyTrackpadPreset, codeLabel, defaults, saveSettings, type Difficulty, type Settings } from './settings';
+import type { Objective } from './objectives';
 import { WEAPONS, type WeaponSystem } from './weapons';
 import { ARENAS, type ArenaId } from './world';
 
@@ -286,6 +287,28 @@ export class UI {
     $('lowhp').style.opacity = low < 0.35 ? ((0.35 - low) / 0.35 * (0.6 + Math.sin(performance.now() * 0.006) * 0.25)).toFixed(2) : '0';
     if (this.announceT > 0) { this.announceT -= dt; if (this.announceT <= 0) $('announce').style.opacity = '0'; }
     $('fps').textContent = this.settings.showFps ? d.fps.toFixed(0) + ' FPS' : '';
+  }
+
+  /** Fills the objective panel and places the waypoint marker. */
+  objective(o: Objective | null, wp: { x: number; y: number; dist: number } | null) {
+    const el = $('objective'), w = $('waypoint');
+    el.classList.toggle('hidden', !o);
+    w.classList.toggle('hidden', !wp);
+    if (wp) {
+      w.style.left = wp.x + 'px'; w.style.top = wp.y + 'px';
+      w.classList.toggle('prime', o!.kind === 'prime');
+      this.set('wp-dist', Math.round(wp.dist) + 'm');
+    }
+    if (!o) return;
+    el.classList.toggle('done', o.status === 'done');
+    el.classList.toggle('failed', o.status === 'failed');
+    this.set('obj-title', o.title);
+    const timed = o.kind === 'hold' || o.kind === 'prime';
+    const left = Math.max(0, Math.ceil(o.goal - o.progress));
+    this.set('obj-desc', o.status === 'done' ? 'Complete' : o.status === 'failed' ? 'Missed' :
+      o.kind === 'prime' ? (wp ? `${o.desc} · ${left}s` : o.desc) : timed ? `${o.desc} · ${left}s` : `${o.desc} · ${o.progress}/${o.goal}`);
+    const frac = o.status === 'done' ? 1 : o.kind === 'prime' ? 1 - o.progress / o.goal : o.progress / o.goal;
+    $('obj-fill').style.width = Math.max(0, Math.min(1, frac)) * 100 + '%';
   }
 
   /** Blip coordinates are already in player-relative space: +x right, +z forward. */

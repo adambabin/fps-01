@@ -25,7 +25,9 @@ Then open the printed URL. `npm run build` type-checks and writes a static site 
 | Aim down sights | Right click (hold) | Q |
 | Reload | R | |
 | Grenade | G | |
+| Melee | V or middle click | |
 | Sprint / Crouch / Jump | Shift / C / Space | |
+| Slide | C while sprinting | |
 | Weapons | 1–6, scroll wheel, E for next | |
 | Pause | Esc or P | |
 
@@ -40,6 +42,8 @@ scroll-to-switch. Every binding can be changed in Settings.
 - Four robots: melee Scuttler, ranged Trooper, flying Drone and rocket-firing Juggernaut,
   steered by a shared flow field so they path around cover.
 - Three arenas (Reactor Hall, Foundry, Server Vault) and a boss, the Warden, every fifth wave.
+- Melee strike, sprint-slide, and one optional side objective per wave that pays out a supply drop
+  and an extra upgrade choice.
 - Wave director, score, pickups (health, armor, ammo, grenades) and 12 stackable upgrades.
 - HUD with radar, hit markers, damage numbers and damage direction indicators.
 - Low / Medium / High graphics presets (shadows, MSAA, HDR bloom).

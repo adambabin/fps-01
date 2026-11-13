@@ -41,6 +41,7 @@ const { chromium } = require('playwright');
           inp.down.add(strafe > 0 ? 'KeyD' : 'KeyA');
           let near = 1e9;
           for (const e of g.enemies.list) if (e.type !== 'drone') near = Math.min(near, e.pos.distanceTo(pl.pos));
+          if (near < 2.4 && i % 36 === 0) inp.pressed.add('KeyV');
           if (near < 7) inp.down.add('KeyS'); else if (target && target.pos.distanceTo(pl.pos) > 24) inp.down.add('KeyW');
           if (target) {
             lockT -= dt;

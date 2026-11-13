@@ -139,6 +139,14 @@ input.pad-focus { outline-offset: 4px; }
 #announce-main { font-size: 46px; font-weight: 800; letter-spacing: 0.3em; }
 #announce-sub { font-size: 14px; letter-spacing: 0.3em; color: var(--orange); margin-top: 6px; }
 #prompt { position: absolute; top: 60%; left: 0; right: 0; text-align: center; font-size: 14px; letter-spacing: 0.22em; font-weight: 700; color: var(--orange); }
+/* Waiting to travel after a boss: a solid panel so it reads on any arena, including bright snow. */
+#ready { position: absolute; top: 108px; left: 50%; transform: translateX(-50%); padding: 12px 22px 11px; background: rgba(8, 11, 15, 0.82); border: 1px solid var(--orange); box-shadow: 0 0 24px rgba(255, 143, 61, 0.35); text-align: center; white-space: nowrap; text-shadow: none; }
+#ready-main { font-size: 17px; font-weight: 800; letter-spacing: 0.18em; color: #fff; }
+#ready-main kbd { display: inline-block; margin: 0 6px; padding: 3px 10px 2px; font: inherit; font-size: 16px; letter-spacing: 0.08em; color: #051018; background: var(--orange); border-radius: 3px; box-shadow: 0 3px 0 #a3501a; animation: readyPulse 1.2s ease-in-out infinite; }
+#ready-sub { margin-top: 6px; font-size: 11px; letter-spacing: 0.12em; color: #c6d0da; }
+@keyframes readyPulse { 0%, 100% { transform: translateY(0); filter: brightness(1); } 50% { transform: translateY(1px); filter: brightness(1.35); } }
+body.touch #ready { top: calc(116px + env(safe-area-inset-top, 0px)); padding: 8px 14px; }
+body.touch #ready-main { font-size: 13px; }
 #feed { position: absolute; right: 26px; top: 92px; text-align: right; font-size: 13px; letter-spacing: 0.06em; }
 #feed div { animation: feed 2.6s forwards; margin-bottom: 3px; }
 #feed b { color: var(--orange); }

@@ -537,11 +537,16 @@ export class Game {
 
   has(k: Keystone): boolean { return this.keystones.has(k); }
 
-  /** HUD line while waiting to travel; touch players have a NEXT ARENA button right below it. */
-  private readyPrompt(): string {
-    if (this.touch) return 'GRAB YOUR DROPS';
+  /** Key (or button) that moves on to the next arena, as shown on screen; '' on touch, which has its own button. */
+  private readyKey(): string {
+    if (this.touch) return '';
     const code = this.pad.active && this.settings.pad.ready ? this.settings.pad.ready : this.settings.binds.ready[0];
-    return `PRESS ${codeLabel(code).toUpperCase()} FOR THE NEXT ARENA`;
+    return codeLabel(code).toUpperCase();
+  }
+
+  private readyPrompt(): string {
+    const k = this.readyKey();
+    return k ? `PRESS ${k} FOR THE NEXT ARENA` : 'TAP NEXT ARENA WHEN READY';
   }
 
   private pickUpgrade(i: number) {
@@ -911,7 +916,7 @@ export class Game {
       health: p.health, maxHealth: p.maxHealth, armor: p.armor, maxArmor: p.maxArmor, wave: Math.max(1, this.wave),
       remaining: this.enemies.list.length + this.queue.length, score: this.score, weapons: w, spreadPx, ads: w.ads,
       sprinting: p.sprinting, fps: this.fps, intermission: this.intermission,
-      prompt: this.awaitReady ? this.readyPrompt() : '',
+      prompt: this.awaitReady ? 'ARENA CLEAR' : '', ready: this.awaitReady ? this.readyKey() : null,
       best: this.best, perks: this.perkStatus(), lives: this.lives, maxLives: MAX_LIVES,
       boss: this.boss && this.boss.alive ? this.boss.hp / this.boss.maxHp : -1, bossName: this.boss ? this.boss.label : '',
     });

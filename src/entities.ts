@@ -180,16 +180,73 @@ export class Pickups {
   private t = 0;
 
   constructor(scene: THREE.Scene) {
-    const body = new THREE.MeshStandardMaterial({ color: 0x22262b, metalness: 0.8, roughness: 0.4 });
-    const cols: [number, number, number][] = [[0.3, 3, 0.6], [0.3, 1.4, 3.5], [3.2, 2.2, 0.3], [3, 0.6, 0.3]];
-    const bg = new THREE.BoxGeometry(0.34, 0.34, 0.34), band = new THREE.BoxGeometry(0.36, 0.07, 0.36), cross = new THREE.BoxGeometry(0.07, 0.36, 0.2);
+    const glow = (r: number, g: number, b: number) => { const m = new THREE.MeshBasicMaterial(); m.color.setRGB(r, g, b); return m; };
+    const std = (color: number, metalness: number, roughness: number) => new THREE.MeshStandardMaterial({ color, metalness, roughness });
+    const dark = std(0x22262b, 0.8, 0.4);
+    const part = (g: THREE.Group, geo: THREE.BufferGeometry, mat: THREE.Material, x = 0, y = 0, z = 0, shadow = false) => {
+      const m = new THREE.Mesh(geo, mat);
+      m.position.set(x, y, z); m.castShadow = shadow;
+      g.add(m);
+      return m;
+    };
+
+    // Health: a white medical case with a green cross on every large face.
+    const medCase = new THREE.BoxGeometry(0.42, 0.32, 0.2), medWhite = std(0xe4e9ee, 0.1, 0.55), green = glow(0.25, 3.4, 0.7);
+    const crossH = new THREE.BoxGeometry(0.2, 0.065, 0.012), crossV = new THREE.BoxGeometry(0.065, 0.2, 0.012);
+    const latch = new THREE.BoxGeometry(0.44, 0.03, 0.21), handle = new THREE.BoxGeometry(0.16, 0.035, 0.05);
+    const health = () => {
+      const g = new THREE.Group();
+      part(g, medCase, medWhite, 0, 0, 0, true);
+      part(g, latch, dark, 0, 0.06, 0);
+      part(g, handle, dark, 0, 0.18, 0);
+      for (const s of [1, -1]) { part(g, crossH, green, 0, -0.035, 0.103 * s); part(g, crossV, green, 0, -0.035, 0.103 * s); }
+      return g;
+    };
+
+    // Armor: a shield-shaped plate with a glowing blue rim and chevron.
+    const outline = (k: number) => {
+      const sh = new THREE.Shape();
+      sh.moveTo(-0.2 * k, 0.21 * k); sh.lineTo(0.2 * k, 0.21 * k); sh.lineTo(0.2 * k, 0.0);
+      sh.quadraticCurveTo(0.19 * k, -0.17 * k, 0, -0.26 * k);
+      sh.quadraticCurveTo(-0.19 * k, -0.17 * k, -0.2 * k, 0.0);
+      sh.closePath();
+      return sh;
+    };
+    const shieldGeo = new THREE.ExtrudeGeometry(outline(1), { depth: 0.05, bevelEnabled: true, bevelSize: 0.012, bevelThickness: 0.012, bevelSegments: 1 });
+    shieldGeo.translate(0, 0, -0.025);
+    const rimGeo = new THREE.ExtrudeGeometry(outline(1.07), { depth: 0.022, bevelEnabled: false });
+    rimGeo.translate(0, 0, -0.011);
+    const bossGeo = new THREE.ExtrudeGeometry(outline(0.42), { depth: 0.1, bevelEnabled: false });
+    bossGeo.translate(0, 0, -0.05);
+    const steelBlue = std(0x41597a, 0.85, 0.32), blue = glow(0.3, 1.5, 3.8);
+    const armor = () => {
+      const g = new THREE.Group();
+      part(g, rimGeo, blue);
+      part(g, shieldGeo, steelBlue, 0, 0, 0, true);
+      part(g, bossGeo, blue);
+      return g;
+    };
+
+    // Ammo: an olive ammunition can with a yellow stripe. Grenade: the same body as the thrown one.
+    const can = new THREE.BoxGeometry(0.4, 0.26, 0.2), lid = new THREE.BoxGeometry(0.42, 0.04, 0.22), stripe = new THREE.BoxGeometry(0.405, 0.06, 0.205);
+    const olive = std(0x4b5330, 0.5, 0.55), yellow = glow(3.2, 2.2, 0.3);
+    const ammo = () => {
+      const g = new THREE.Group();
+      part(g, can, olive, 0, 0, 0, true); part(g, lid, dark, 0, 0.14, 0); part(g, handle, dark, 0, 0.18, 0); part(g, stripe, yellow, 0, -0.02, 0);
+      return g;
+    };
+    const ball = new THREE.SphereGeometry(0.15, 12, 9), cap = new THREE.CylinderGeometry(0.05, 0.06, 0.1, 8), ringG = new THREE.CylinderGeometry(0.153, 0.153, 0.04, 14);
+    const grenGreen = std(0x2c3a2c, 0.6, 0.5), red = glow(3, 0.6, 0.3);
+    const grenade = () => {
+      const g = new THREE.Group();
+      part(g, ball, grenGreen, 0, 0, 0, true); part(g, cap, dark, 0, 0.17, 0); part(g, ringG, red, 0, 0, 0);
+      return g;
+    };
+
+    const builders = [health, armor, ammo, grenade];
     for (let kind = 0; kind < 4; kind++) {
-      const glow = new THREE.MeshBasicMaterial(); glow.color.setRGB(...cols[kind]);
       for (let i = 0; i < 8; i++) {
-        const g = new THREE.Group();
-        const b = new THREE.Mesh(bg, body); b.castShadow = true;
-        g.add(b, new THREE.Mesh(band, glow));
-        if (kind === PICKUP_HEALTH) g.add(new THREE.Mesh(cross, glow));
+        const g = builders[kind]();
         g.visible = false;
         scene.add(g);
         this.list.push({ kind, group: g, life: 0, active: false, baseY: 0.5 });

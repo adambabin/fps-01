@@ -21,7 +21,7 @@
       <div id="remaining"></div>
       <div id="boss" class="hidden"><div id="boss-name">WARDEN</div><div id="boss-bar"><div id="boss-fill"></div></div></div>
     </div>
-    <div id="score-box"><div id="score">0</div><div id="score-label">SCORE</div></div>
+    <div id="score-box"><div id="score">0</div><div id="score-label">SCORE</div><div id="score-best"></div></div>
     <div id="announce"><div id="announce-main"></div><div id="announce-sub"></div></div>
     <div id="prompt"></div>
     <div id="feed"></div>
@@ -37,6 +37,7 @@
       <div id="slots"></div>
     </div>
     <div id="objective" class="hidden"><div id="obj-label">OBJECTIVE</div><div id="obj-title"></div><div id="obj-desc"></div><div id="obj-bar"><div id="obj-fill"></div></div></div>
+    <div id="nameplate" class="hidden"><div id="np-name"></div><div id="np-bar"><div id="np-fill"></div></div></div>
     <div id="waypoint" class="hidden"><i></i><span id="wp-dist"></span></div>
     <div id="fps"></div>
   </div>
@@ -52,6 +53,7 @@
       <div id="arena-blurb" class="blurb"></div>
       <div class="seg-label">DIFFICULTY</div>
       <div id="difficulty" class="seg"></div>
+      <button id="btn-scores">Scoreboard</button>
       <button id="btn-settings">Settings</button>
       <div id="best"></div>
       <div class="hint">WASD move · Mouse / trackpad aim · Click or F fire · Right-click or Q aim · R reload · G grenade · V melee · Shift sprint · C crouch (slide while sprinting) · 1–6 weapons · Esc pause</div>
@@ -62,6 +64,7 @@
     <div class="panel">
       <h2>Paused</h2>
       <button id="btn-resume" class="primary">Resume</button>
+      <button id="btn-pause-scores">Scoreboard</button>
       <button id="btn-pause-settings">Settings</button>
       <button id="btn-restart">Restart run</button>
       <button id="btn-quit">Quit to menu</button>
@@ -95,7 +98,17 @@
       <h2>You were overrun</h2>
       <div id="stats"></div>
       <button id="btn-again" class="primary">Redeploy</button>
+      <button id="btn-over-scores">Scoreboard</button>
       <button id="btn-over-quit">Main menu</button>
+    </div>
+  </div>
+
+  <div id="scores" class="screen hidden">
+    <div class="panel wide">
+      <h2>Scoreboard</h2>
+      <div class="hint" style="margin-top:-6px">Your best 20 runs on this device</div>
+      <div id="scores-body"></div>
+      <div class="row-buttons"><button id="btn-scores-back" class="primary">Back</button></div>
     </div>
   </div>
 

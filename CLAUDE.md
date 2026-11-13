@@ -42,6 +42,10 @@ There is no lint config and no test suite. Verification is done by driving the b
 
 **Boss.** The Warden is an `EnemyType` (`'boss'`) handled inside `Enemy.update`, spawned first on every fifth wave. It flies above cover, cycles barrage → rocket salvo → ground pulse (`Shockwaves` in `entities.ts`, dodged by jumping), and summons Scuttlers at 66% and 33% health through `EnemyCtx.summon`.
 
+**Boss roster.** `bosses.ts` lists the bosses in arrival order (one per fifth wave, then repeating): name, hull tint and trait. `Game.spawn` copies the name to `Enemy.label` and sets `Enemy.tier`, which the boss branch of `Enemy.update` reads to vary its attacks. Rename bosses in that table only.
+
+**Scoreboard.** Finished runs are stored in `localStorage` (`rustwake.scores.v1`, best 20) via `saveScore`/`loadScores` in `settings.ts`; there is no server, so scores are per device.
+
 **Objectives.** `objectives.ts` runs one optional side objective per wave from wave 2 (never on boss waves): hold a zone, kill a marked Prime robot on a timer, or score kills by melee, weak point or explosives. `Game.hitSource` records how the damage being applied was dealt (`bullet | melee | blast`) and is read in `onKill`; set it around any new damage path. Completion calls `Game.objectiveDone()` (score, three pickups, and `bonusCard` for a fourth upgrade card).
 
 **Melee and slide.** Melee is a timed swing in `WeaponSystem` that calls `FireCtx.melee` part-way through; `Game.melee()` does the cone test. Sliding lives in `Player.update`: pressing crouch while sprinting replaces ground movement with a decaying slide velocity until it ends or is jumped out of.

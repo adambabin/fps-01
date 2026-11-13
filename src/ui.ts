@@ -1,12 +1,12 @@
 import type { Input } from './input';
-import { ACTIONS, ACTION_LABELS, DIFFICULTY, applyTrackpadPreset, codeLabel, defaults, saveSettings, type Difficulty, type Settings } from './settings';
+import { ACTIONS, ACTION_LABELS, DIFFICULTY, applyTrackpadPreset, codeLabel, defaults, loadScores, saveSettings, type Difficulty, type Settings } from './settings';
 import type { Objective } from './objectives';
 import { WEAPONS, type WeaponSystem } from './weapons';
 import { ARENAS, type ArenaId } from './world';
 
 const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
 
-export type Screen = 'menu' | 'pause' | 'settings' | 'upgrade' | 'gameover';
+export type Screen = 'menu' | 'pause' | 'settings' | 'upgrade' | 'gameover' | 'scores';
 export interface Card { name: string; desc: string; weapon?: boolean; }
 
 export interface UICallbacks {
@@ -20,6 +20,9 @@ export class UI {
   private screens: Record<Screen, HTMLElement>;
   private hud = $('hud');
   private settingsFrom: Screen = 'menu';
+  private scoresFrom: Screen = 'menu';
+  /** Timestamp of the run that just ended, highlighted on the scoreboard. */
+  lastRun = 0;
   private hitT = 0;
   private vig = 0;
   private announceT = 0;
@@ -28,8 +31,10 @@ export class UI {
   current: Screen | null = 'menu';
 
   constructor(private settings: Settings, private input: Input, private cb: UICallbacks) {
-    this.screens = { menu: $('menu'), pause: $('pause'), settings: $('settings'), upgrade: $('upgrade'), gameover: $('gameover') };
+    this.screens = { menu: $('menu'), pause: $('pause'), settings: $('settings'), upgrade: $('upgrade'), gameover: $('gameover'), scores: $('scores') };
     const on = (id: string, fn: () => void) => $(id).addEventListener('click', () => { cb.click(); fn(); });
+    for (const [id, from] of [['btn-scores', 'menu'], ['btn-pause-scores', 'pause'], ['btn-over-scores', 'gameover']] as const) on(id, () => this.openScores(from));
+    on('btn-scores-back', () => this.show(this.scoresFrom));
     on('btn-play', () => cb.play());
     on('btn-resume', () => cb.resume());
     on('btn-restart', () => cb.restart());
@@ -73,6 +78,30 @@ export class UI {
     for (const k in this.screens) this.screens[k as Screen].classList.toggle('hidden', k !== s);
   }
   showHud(v: boolean) { this.hud.classList.toggle('hidden', !v); }
+
+  private openScores(from: Screen) {
+    this.scoresFrom = from;
+    const body = $('scores-body'), list = loadScores();
+    body.innerHTML = '';
+    if (!list.length) { body.innerHTML = '<div class="empty">No runs recorded yet. Finish a run to get on the board.</div>'; }
+    else {
+      const table = document.createElement('table');
+      table.innerHTML = '<thead><tr><th>#</th><th>Score</th><th>Wave</th><th>Kills</th><th>Time</th><th>Arena</th><th>Difficulty</th><th>Date</th></tr></thead>';
+      const tb = document.createElement('tbody');
+      list.forEach((e, i) => {
+        const tr = document.createElement('tr');
+        if (e.date === this.lastRun) tr.className = 'latest';
+        const time = `${Math.floor(e.time / 60)}:${String(e.time % 60).padStart(2, '0')}`;
+        const date = new Date(e.date).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+        for (const v of [i + 1, e.score.toLocaleString(), e.wave, e.kills, time, e.arena, e.difficulty, date]) {
+          const td = document.createElement('td'); td.textContent = String(v); tr.append(td);
+        }
+        tb.append(tr);
+      });
+      table.append(tb); body.append(table);
+    }
+    this.show('scores');
+  }
 
   private openSettings(from: Screen) { this.settingsFrom = from; this.buildSettings(); this.show('settings'); }
   private commit() { saveSettings(this.settings); this.cb.settingsChanged(); }
@@ -249,8 +278,11 @@ export class UI {
 
   update(dt: number, d: {
     health: number; maxHealth: number; armor: number; maxArmor: number; wave: number; remaining: number; score: number;
-    weapons: WeaponSystem; spreadPx: number; ads: number; sprinting: boolean; fps: number; intermission: number; boss: number;
+    weapons: WeaponSystem; spreadPx: number; ads: number; sprinting: boolean; fps: number; intermission: number; boss: number; bossName: string; best: number;
   }) {
+    this.set('score-best', d.best <= 0 ? '' : d.score > d.best ? 'NEW BEST' : 'BEST ' + d.best.toLocaleString());
+    $('score-best').classList.toggle('beaten', d.best > 0 && d.score > d.best);
+    if (d.boss >= 0) { this.set('boss-name', d.bossName.toUpperCase()); this.set('np-name', d.bossName.toUpperCase()); $('np-fill').style.width = Math.max(0, d.boss) * 100 + '%'; }
     $('boss').classList.toggle('hidden', d.boss < 0);
     if (d.boss >= 0) $('boss-fill').style.width = Math.max(0, d.boss) * 100 + '%';
     const w = d.weapons, st = w.state;
@@ -287,6 +319,13 @@ export class UI {
     $('lowhp').style.opacity = low < 0.35 ? ((0.35 - low) / 0.35 * (0.6 + Math.sin(performance.now() * 0.006) * 0.25)).toFixed(2) : '0';
     if (this.announceT > 0) { this.announceT -= dt; if (this.announceT <= 0) $('announce').style.opacity = '0'; }
     $('fps').textContent = this.settings.showFps ? d.fps.toFixed(0) + ' FPS' : '';
+  }
+
+  /** Positions the boss's floating name and health bar, or hides it. */
+  nameplate(at: { x: number; y: number } | null) {
+    const el = $('nameplate');
+    el.classList.toggle('hidden', !at);
+    if (at) { el.style.left = at.x + 'px'; el.style.top = at.y + 'px'; }
   }
 
   /** Fills the objective panel and places the waypoint marker. */

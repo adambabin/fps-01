@@ -95,6 +95,28 @@ export function saveSettings(s: Settings) {
   try { localStorage.setItem(KEY, JSON.stringify(s)); } catch { /* ignore */ }
 }
 
+/** One finished run on the local scoreboard. */
+export interface ScoreEntry { score: number; wave: number; kills: number; time: number; arena: string; difficulty: string; date: number; }
+
+const SCORES_KEY = 'rustwake.scores.v1', MAX_SCORES = 20;
+
+export function loadScores(): ScoreEntry[] {
+  try {
+    const list = JSON.parse(localStorage.getItem(SCORES_KEY) || '[]');
+    return Array.isArray(list) ? list : [];
+  } catch { return []; }
+}
+
+/** Adds a run, keeps the best 20, and returns the run's 1-based rank (0 if it did not place). */
+export function saveScore(entry: ScoreEntry): number {
+  const list = loadScores();
+  list.push(entry);
+  list.sort((a, b) => b.score - a.score);
+  list.length = Math.min(list.length, MAX_SCORES);
+  try { localStorage.setItem(SCORES_KEY, JSON.stringify(list)); } catch { /* ignore */ }
+  return list.indexOf(entry) + 1;
+}
+
 export function loadHighScore(): number {
   try { return Number(localStorage.getItem('rustwake.best') || 0); } catch { return 0; }
 }

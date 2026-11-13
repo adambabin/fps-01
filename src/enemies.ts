@@ -59,6 +59,10 @@ export class Enemy {
   alive = true;
   def: Def;
   flash = 0;
+  /** Display name; bosses get theirs from the roster. */
+  label: string;
+  /** Boss tier, 1-based: later bosses add to their attacks. */
+  tier = 1;
   private mode = 0;
   private lastMode = 0;
   private stage = 0;
@@ -86,6 +90,7 @@ export class Enemy {
 
   constructor(public type: EnemyType, pos: THREE.Vector3, hpMult: number, public dmgMult: number) {
     this.def = ENEMY_DEFS[type];
+    this.label = this.def.name;
     this.hp = this.maxHp = this.def.hp * hpMult;
     this.pos.copy(pos);
     const model = createRobot(type);
@@ -119,6 +124,9 @@ export class Enemy {
     }
     return found ? { dist: best, crit } : null;
   }
+
+  /** Multiplies the armor colors, used to tell boss tiers apart. */
+  tint(hex: number) { this.hull.color.setHex(hex); }
 
   /** True while a Trooper is telegraphing or firing a burst. */
   get engaging(): boolean { return this.type === 'trooper' && (this.windup > 0 || this.burst > 0); }
@@ -219,12 +227,13 @@ export class Enemy {
       facePlayer = true;
       const rage = this.hp < this.maxHp * 0.33;
       const stage = rage ? 2 : this.hp < this.maxHp * 0.66 ? 1 : 0;
-      if (stage > this.stage) { this.stage = stage; c.summon('scuttler', 3 + stage); }
+      if (stage > this.stage) { this.stage = stage; c.summon(this.tier >= 4 ? 'trooper' : 'scuttler', (this.tier >= 4 ? 2 : 3) + stage); }
       if (this.mode === 0) {
         if (this.attackCd <= 0 && this.age > 2.5) {
           this.mode = this.lastMode = (this.lastMode % 3) + 1;
           this.windup = this.mode === 3 ? 1.2 : 0.7;
-          this.burst = this.mode === 1 ? (rage ? 26 : 18) : this.mode === 2 ? (rage ? 5 : 3) : 1;
+          const t = this.tier;
+          this.burst = this.mode === 1 ? (rage ? 26 : 18) + (t === 2 || t >= 5 ? 10 : 0) : this.mode === 2 ? (rage ? 5 : 3) + (t >= 4 ? 2 : 0) : t === 3 || t >= 5 ? 2 : 1;
           this.burstT = 0;
           if (this.mode === 3) c.audio.charge(this.pos);
         }
@@ -237,7 +246,7 @@ export class Enemy {
           this.burst--; this.side = -this.side;
           if (this.mode === 1) { this.burstT = 0.1; if (this.los) this.fire(c, 0.35 * this.side, -1.05, 1.3, 28, 4, 'bolt', 0.1, 0.3); }
           else if (this.mode === 2) { this.burstT = 0.32; this.fire(c, 1.68 * this.side, 0.1, 0.6, 15, 20, 'rocket', 0.05, 0.3); }
-          else c.shockwave(this.pos, 22 * this.dmgMult);
+          else { this.burstT = 0.9; c.shockwave(this.pos, 22 * this.dmgMult); }
         }
         if (this.burst <= 0) { this.mode = 0; this.attackCd = rage ? 1.3 : 2.4; }
       }

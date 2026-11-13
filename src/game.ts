@@ -6,13 +6,14 @@ import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
 import { AudioSys } from './audio';
 import { Effects } from './effects';
+import { BOSSES } from './bosses';
 import { ENEMY_DEFS, EnemyManager, type Enemy, type EnemyCtx, type EnemyType } from './enemies';
 import { PICKUP_AMMO, PICKUP_ARMOR, PICKUP_GRENADE, PICKUP_HEALTH, Pickups, Projectiles, Shockwaves, type ProjCtx } from './entities';
 import { Input } from './input';
 import { FlowField } from './nav';
 import { Objectives, type KillSource } from './objectives';
 import { Player } from './player';
-import { DIFFICULTY, loadHighScore, loadSettings, saveHighScore, type Settings } from './settings';
+import { DIFFICULTY, loadHighScore, loadSettings, saveHighScore, saveScore, type Settings } from './settings';
 import { UI, type Card, type RadarBlip } from './ui';
 import { WEAPONS, WeaponSystem, type FireCtx } from './weapons';
 import { ARENAS, CEIL, World } from './world';
@@ -84,6 +85,8 @@ export class Game {
   private hitSource: KillSource = 'bullet';
   /** Set by a completed objective: the next upgrade screen offers one more card. */
   private bonusCard = false;
+  /** Best score before this run started, for the live marker under the score. */
+  private best = 0;
   private composer!: EffectComposer;
   private bloom!: UnrealBloomPass;
   private queue: EnemyType[] = [];
@@ -267,6 +270,7 @@ export class Game {
     this.state = 'playing';
     this.weapons.scene.visible = true;
     this.ui.show(null); this.ui.showHud(true);
+    this.best = loadHighScore();
     this.ui.announce('STAND BY', 'HOSTILES INBOUND', 2.2);
     this.input.reset();
     this.requestLock();
@@ -322,7 +326,11 @@ export class Game {
       this.objectives.start(w, this.openSpot(), this.weapons.grenades > 0 || this.weapons.states[5].unlocked);
       this.ui.feed(`Objective: <b>${this.objectives.current!.title}</b>`);
     }
-    if (bossWave) { this.ui.announce('WARNING', 'WARDEN INBOUND', 3); this.audio.alarm(); }
+    if (bossWave) {
+      const def = BOSSES[(Math.floor(w / 5) - 1) % BOSSES.length];
+      this.ui.announce(def.name.toUpperCase(), `BOSS INBOUND · ${def.trait.toUpperCase()}`, 3.2);
+      this.audio.alarm();
+    }
     else { this.ui.announce('WAVE ' + w, `${q.length} HOSTILES`); this.audio.waveStart(); }
   }
 
@@ -331,7 +339,10 @@ export class Game {
     if (type === 'boss') {
       // Each return of the Warden is tougher than the last.
       const n = Math.max(1, Math.floor(this.wave / 5));
+      const def = BOSSES[(n - 1) % BOSSES.length];
       this.boss = this.enemies.spawn(type, tmpA.set(0, CEIL - 2.6, -16), (0.6 + 0.4 * n) * this.diff.hp, dmg);
+      this.boss.label = def.name; this.boss.tier = ((n - 1) % BOSSES.length) + 1;
+      this.boss.tint(def.tint);
       this.effects.explosion(tmpA, 1.2, 0.6, 2, 3.5);
     } else if (type === 'drone') {
       const v = this.world.vents[(Math.random() * this.world.vents.length) | 0];
@@ -402,6 +413,9 @@ export class Game {
     if (document.pointerLockElement) document.exitPointerLock();
     const best = loadHighScore();
     if (this.score > best) saveHighScore(this.score);
+    const date = Date.now();
+    const rank = saveScore({ score: this.score, wave: this.wave, kills: this.kills, time: Math.round(this.runTime), arena: ARENAS[this.settings.arena].name, difficulty: this.diff.label, date });
+    this.ui.lastRun = date;
     const m = Math.floor(this.runTime / 60), s = Math.floor(this.runTime % 60);
     setTimeout(() => {
       if (this.state !== 'dead') return;
@@ -409,6 +423,7 @@ export class Game {
       this.ui.showGameOver([
         ['Wave reached', `${this.wave}  ·  ${this.diff.label}`], ['Score', this.score.toLocaleString() + (this.score > best ? '  ★ new best' : '')],
         ['Robots destroyed', String(this.kills)], ['Time survived', `${m}:${String(s).padStart(2, '0')}`],
+        ['Scoreboard', rank ? `#${rank}` : 'Did not place'],
       ]);
     }, 1400);
   }
@@ -478,7 +493,7 @@ export class Game {
     const src = this.hitSource, prime = e === this.objectives.prime;
     const pts = Math.round(e.def.score * (crit ? 1.25 : 1) * (src === 'melee' ? 1.25 : 1) * (prime ? 3 : 1));
     this.score += pts;
-    this.ui.feed(`${prime ? 'Prime ' : ''}${e.def.name} destroyed <b>+${pts}</b>${crit ? ' · WEAK POINT' : src === 'melee' ? ' · MELEE' : ''}`);
+    this.ui.feed(`${prime ? 'Prime ' : ''}${e.label} destroyed <b>+${pts}</b>${crit ? ' · WEAK POINT' : src === 'melee' ? ' · MELEE' : ''}`);
     if (this.objectives.onKill(e, src, crit)) this.objectiveDone();
     if (src === 'melee') {
       // Melee kills always shake something loose.
@@ -488,7 +503,7 @@ export class Game {
     if (this.lifesteal) this.player.health = Math.min(this.player.maxHealth, this.player.health + this.lifesteal);
     const p = e.center(tmpC).clone();
     p.y = 0.5;
-    if (e.type === 'boss') { this.boss = null; this.ui.announce('WARDEN DESTROYED', `+${pts}`, 2.5); }
+    if (e.type === 'boss') { this.boss = null; this.ui.announce(`${e.label.toUpperCase()} DESTROYED`, `+${pts}`, 2.5); }
     const drops = e.type === 'boss' ? 7 : e.type === 'heavy' ? 3 : 1;
     for (let i = 0; i < drops; i++) {
       const r = Math.random(), hurt = this.player.health < this.player.maxHealth * 0.5;
@@ -634,7 +649,8 @@ export class Game {
       health: p.health, maxHealth: p.maxHealth, armor: p.armor, maxArmor: p.maxArmor, wave: Math.max(1, this.wave),
       remaining: this.enemies.list.length + this.queue.length, score: this.score, weapons: w, spreadPx, ads: w.ads,
       sprinting: p.sprinting, fps: this.fps, intermission: this.intermission,
-      boss: this.boss && this.boss.alive ? this.boss.hp / this.boss.maxHp : -1,
+      best: this.best,
+      boss: this.boss && this.boss.alive ? this.boss.hp / this.boss.maxHp : -1, bossName: this.boss ? this.boss.label : '',
     });
     const sy = Math.sin(p.yaw), cy = Math.cos(p.yaw), blips: RadarBlip[] = [];
     for (const en of this.enemies.list) {
@@ -658,5 +674,12 @@ export class Game {
       wp = { x: (x * 0.5 + 0.5) * window.innerWidth, y: (-y * 0.5 + 0.5) * h, dist };
     }
     this.ui.objective(obj, wp);
+    // Name and health bar floating above the boss
+    let plate: { x: number; y: number } | null = null;
+    if (this.boss && this.boss.alive) {
+      tmpB.copy(this.boss.pos).setY(this.boss.pos.y + 2.9).project(this.camera);
+      if (tmpB.z < 1 && Math.abs(tmpB.x) < 1.1 && Math.abs(tmpB.y) < 1.1) plate = { x: (tmpB.x * 0.5 + 0.5) * window.innerWidth, y: (-tmpB.y * 0.5 + 0.5) * h };
+    }
+    this.ui.nameplate(plate);
   }
 }

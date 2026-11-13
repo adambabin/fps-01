@@ -95,6 +95,15 @@ button.primary:hover { background: #8be4ff; }
 #top { position: absolute; top: 20px; left: 50%; transform: translateX(-50%); text-align: center; }
 #wave { font-size: 20px; font-weight: 800; letter-spacing: 0.3em; }
 #remaining { font-size: 12px; letter-spacing: 0.2em; color: var(--dim); margin-top: 3px; }
+#score-best { font-size: 11px; letter-spacing: 0.16em; color: var(--dim); margin-top: 4px; }
+#score-best.beaten { color: #ffd23a; }
+#scores-body { overflow-x: auto; margin-top: 8px; }
+#scores-body table { width: 100%; border-collapse: collapse; font-size: 14px; font-variant-numeric: tabular-nums; }
+#scores-body th { text-align: left; font-size: 11px; letter-spacing: 0.2em; color: var(--cyan); font-weight: 600; padding: 6px 10px; border-bottom: 1px solid var(--line); text-transform: uppercase; }
+#scores-body td { padding: 7px 10px; border-bottom: 1px solid rgba(140, 170, 200, 0.08); white-space: nowrap; }
+#scores-body td:nth-child(2) { font-weight: 700; }
+#scores-body tr.latest td { background: rgba(255, 143, 61, 0.16); color: #fff; }
+#scores-body .empty { color: var(--dim); padding: 18px 0; }
 #boss { margin-top: 10px; }
 #boss-name { font-size: 12px; letter-spacing: 0.4em; color: var(--red); font-weight: 700; }
 #boss-bar { width: min(460px, 60vw); height: 9px; margin: 5px auto 0; background: rgba(8, 12, 16, 0.75); border: 1px solid rgba(255, 90, 70, 0.5); }
@@ -140,6 +149,10 @@ button.primary:hover { background: #8be4ff; }
 #obj-desc { font-size: 12px; color: var(--dim); margin-top: 2px; }
 #obj-bar { height: 4px; background: rgba(255, 255, 255, 0.12); margin-top: 7px; }
 #obj-fill { height: 100%; width: 0; background: #6dff8c; transition: width 0.1s; }
+#nameplate { position: absolute; transform: translate(-50%, -100%); text-align: center; }
+#np-name { font-size: 13px; font-weight: 800; letter-spacing: 0.3em; color: #ffd9d2; }
+#np-bar { width: 150px; height: 5px; margin: 4px auto 0; background: rgba(8, 12, 16, 0.75); border: 1px solid rgba(255, 90, 70, 0.6); }
+#np-fill { height: 100%; background: linear-gradient(90deg, #ff3a2a, #ff8f3d); }
 #waypoint { position: absolute; transform: translate(-50%, -50%); text-align: center; font-size: 11px; letter-spacing: 0.08em; color: #6dff8c; font-weight: 700; }
 #waypoint i { display: block; width: 11px; height: 11px; margin: 0 auto 4px; border: 2px solid #6dff8c; transform: rotate(45deg); box-shadow: 0 0 6px rgba(109, 255, 140, 0.7); }
 #waypoint.prime { color: #ffc23a; }

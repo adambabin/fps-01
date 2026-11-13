@@ -20,7 +20,8 @@ export class Input {
   constructor(private settings: Settings) {
     window.addEventListener('keydown', (e) => {
       if (this.capture) {
-        e.preventDefault();
+        // Stop other key handlers (e.g. Escape closing the settings screen) from also seeing it.
+        e.preventDefault(); e.stopImmediatePropagation();
         const c = this.capture; this.capture = null; c(e.code);
         return;
       }

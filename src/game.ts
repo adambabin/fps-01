@@ -142,6 +142,10 @@ export class Game {
   private fireCtx: FireCtx;
   /** Automated-test mode: runs without pointer lock. */
   private test = new URLSearchParams(location.search).has('test');
+  /** When the pause menu last opened, so the Escape that opened it does not also close it. */
+  private pausedAt = 0;
+  /** True while a raw-input pointer-lock request may still be retried in the default mode. */
+  private lockRetry = false;
   /** Phones and tablets: no pointer lock, on-screen controls instead. */
   private touch: TouchControls | null = null;
 
@@ -208,8 +212,16 @@ export class Game {
     document.addEventListener('pointerlockchange', () => {
       if (!this.locked() && this.state === 'playing') this.pause();
     });
-    document.addEventListener('pointerlockerror', () => { if (this.state === 'playing' && !this.locked()) this.pause(); });
+    document.addEventListener('pointerlockerror', () => { if (!this.lockRetry && this.state === 'playing' && !this.locked()) this.pause(); });
     canvas.addEventListener('click', () => { if (this.state === 'playing' && !this.locked()) this.requestLock(); });
+    // Escape backs out of menus. In play, the browser's own Escape releases the mouse and pauses.
+    window.addEventListener('keydown', (e) => {
+      if (e.code !== 'Escape' || e.repeat) return;
+      if (this.ui.back()) return;
+      // Ignore the same Escape press that just opened the pause menu.
+      if (this.state === 'paused' && this.ui.current === 'pause' && performance.now() - this.pausedAt > 400) this.resume(false);
+      else if (this.state === 'playing' && !this.locked()) this.pause();
+    });
     window.addEventListener('resize', () => this.resize());
     document.addEventListener('visibilitychange', () => { if (document.hidden && this.state === 'playing') this.pause(); });
 
@@ -227,14 +239,19 @@ export class Game {
   private requestLock() {
     if (this.touch) { this.touch.show(true); return; }
     if (this.test) return;
-    const fail = () => { if (this.state === 'playing' && !this.locked()) this.pause(); };
+    const fail = () => { this.lockRetry = false; if (this.state === 'playing' && !this.locked()) this.pause(); };
     try {
-      const p = (this.canvas as any).requestPointerLock(this.settings.rawInput ? { unadjustedMovement: true } : undefined);
-      if (p && p.catch) p.catch(() => {
+      const raw = this.settings.rawInput;
+      // While the raw-input attempt is pending, its error event must not pause the game.
+      this.lockRetry = raw;
+      const p = (this.canvas as any).requestPointerLock(raw ? { unadjustedMovement: true } : undefined);
+      if (p && p.then) p.then(() => { this.lockRetry = false; }, () => {
         // Raw input is not supported everywhere; retry with the default mode.
         const q = (this.canvas as any).requestPointerLock();
-        if (q && q.catch) q.catch(fail);
+        if (q && q.then) q.then(() => { this.lockRetry = false; }, fail);
+        else this.lockRetry = false;
       });
+      else this.lockRetry = false;
     } catch { fail(); }
   }
 
@@ -342,17 +359,22 @@ export class Game {
   private pause() {
     if (this.state !== 'playing') return;
     this.state = 'paused';
+    this.pausedAt = performance.now();
     this.input.reset();
     this.touch?.show(false);
     if (document.pointerLockElement) document.exitPointerLock();
     this.ui.show('pause');
   }
 
-  private resume() {
+  /**
+   * Leaves the pause menu. Browsers only grant mouse capture from a click (not from Escape),
+   * so `lock = false` returns to the game showing "click to continue" instead.
+   */
+  private resume(lock = true) {
     if (this.state !== 'paused') return;
     this.state = 'playing';
     this.ui.show(null);
-    this.requestLock();
+    if (lock || this.touch) this.requestLock();
   }
 
   private toMenu() {

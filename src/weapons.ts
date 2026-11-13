@@ -226,7 +226,8 @@ export class WeaponSystem {
     this.wheelCd -= dt;
     if (settings.scrollSwitch && input.wheel !== 0) {
       this.wheelAcc += input.wheel;
-      if (Math.abs(this.wheelAcc) >= 60 && this.wheelCd <= 0) { this.cycle(this.wheelAcc > 0 ? 1 : -1); this.wheelAcc = 0; this.wheelCd = 0.22; }
+      // Scrolling up moves to the next weapon, down to the previous one.
+      if (Math.abs(this.wheelAcc) >= 60 && this.wheelCd <= 0) { this.cycle(this.wheelAcc < 0 ? 1 : -1); this.wheelAcc = 0; this.wheelCd = 0.22; }
     }
     input.wheel = 0;
 

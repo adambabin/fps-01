@@ -32,6 +32,10 @@ button.primary { background: var(--cyan); color: #051018; border-color: var(--cy
 button.primary:hover { background: #8be4ff; }
 .title-panel button.primary { background: var(--orange); border-color: var(--orange); }
 .title-panel button.primary:hover { background: #ffad6b; }
+.seg-label { font-size: 11px; letter-spacing: 0.28em; color: var(--dim); margin-top: 6px; }
+.seg { display: flex; gap: 6px; margin-bottom: 4px; }
+.seg button { flex: 1; padding: 9px 6px; font-size: 12px; }
+.seg button.active { background: var(--ink); color: #051018; border-color: var(--ink); }
 .row-buttons { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 12px; }
 .row-buttons button { flex: 1 1 160px; }
 

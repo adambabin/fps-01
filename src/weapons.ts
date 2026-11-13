@@ -21,17 +21,17 @@ export interface WeaponDef {
 
 export const WEAPONS: WeaponDef[] = [
   {
-    name: 'P-9 Sidearm', slot: 'Sidearm', sound: 'pistol', auto: false, damage: 30, pellets: 1, rpm: 420, mag: 12, reserve: Infinity, reload: 1.25,
-    hip: 0.014, ads: 0.002, bloom: 0.012, kickP: 0.022, kickY: 0.008, zoom: 1.2, adsTime: 0.14, falloff: [18, 40, 0.6],
+    name: 'P-9 Sidearm', slot: 'Sidearm', sound: 'pistol', auto: false, damage: 27, pellets: 1, rpm: 380, mag: 12, reserve: Infinity, reload: 1.25,
+    hip: 0.014, ads: 0.002, bloom: 0.012, kickP: 0.024, kickY: 0.007, zoom: 1.2, adsTime: 0.14, falloff: [18, 40, 0.6],
     crit: 2, pierce: false, hipPos: [0.12, -0.115, -0.44], adsZ: -0.5, tracer: [3, 2.2, 1.2],
   },
   {
     name: 'AR-7 Vector', slot: 'Rifle', sound: 'rifle', auto: true, damage: 21, pellets: 1, rpm: 680, mag: 30, reserve: 180, reload: 1.9,
-    hip: 0.022, ads: 0.0035, bloom: 0.006, kickP: 0.012, kickY: 0.007, zoom: 1.35, adsTime: 0.2, falloff: [28, 60, 0.65],
+    hip: 0.022, ads: 0.0035, bloom: 0.006, kickP: 0.0085, kickY: 0.0045, zoom: 1.35, adsTime: 0.2, falloff: [28, 60, 0.65],
     crit: 1.8, pierce: false, hipPos: [0.135, -0.155, -0.4], adsZ: -0.33, tracer: [3, 2.2, 1.2],
   },
   {
-    name: 'SG-12 Breacher', slot: 'Shotgun', sound: 'shotgun', auto: false, damage: 13, pellets: 10, rpm: 78, mag: 6, reserve: 36, reload: 2.3,
+    name: 'SG-12 Breacher', slot: 'Shotgun', sound: 'shotgun', auto: false, damage: 14, pellets: 10, rpm: 84, mag: 6, reserve: 36, reload: 2.3,
     hip: 0.062, ads: 0.045, bloom: 0, kickP: 0.07, kickY: 0.015, zoom: 1.15, adsTime: 0.22, falloff: [8, 24, 0.25],
     crit: 1.4, pierce: false, hipPos: [0.135, -0.135, -0.38], adsZ: -0.3, tracer: [2.5, 1.8, 1],
   },
@@ -291,7 +291,9 @@ export class WeaponSystem {
 
     // Recoil and feedback
     const k = 1 - this.ads * 0.3;
-    player.recoilPitch += def.kickP * k;
+    // The first rounds of a burst kick hardest; sustained fire settles into a steady climb.
+    const first = def.auto ? 1 + Math.max(0, 1 - this.heat / (def.bloom * 4)) * 0.8 : 1;
+    player.recoilPitch += def.kickP * k * first;
     player.recoilYaw += (Math.random() - 0.5) * 2 * def.kickY * k;
     this.heat = Math.min(def.hip * 1.6 + 0.02, this.heat + def.bloom);
     this.kick = Math.min(1.6, this.kick + (def.pellets > 1 || def.pierce ? 1.3 : def.auto ? 0.55 : 0.9));

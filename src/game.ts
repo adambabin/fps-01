@@ -11,7 +11,7 @@ import { PICKUP_AMMO, PICKUP_ARMOR, PICKUP_GRENADE, PICKUP_HEALTH, Pickups, Proj
 import { Input } from './input';
 import { FlowField } from './nav';
 import { Player } from './player';
-import { loadHighScore, loadSettings, saveHighScore, type Settings } from './settings';
+import { DIFFICULTY, loadHighScore, loadSettings, saveHighScore, type Settings } from './settings';
 import { UI, type Card, type RadarBlip } from './ui';
 import { WEAPONS, WeaponSystem, type FireCtx } from './weapons';
 import { World } from './world';
@@ -124,7 +124,7 @@ export class Game {
 
     const shared = { world: this.world.collision, effects: this.effects, audio: this.audio, player: this.player };
     this.enemyCtx = {
-      ...shared, nav: this.nav, projectiles: this.projectiles,
+      ...shared, nav: this.nav, projectiles: this.projectiles, shotSpeed: 1, slots: 2, shared: { droneCd: 0, engaged: 0 },
       hurtPlayer: (a, from) => this.hurtPlayer(a, from),
       onKill: (e, crit) => this.onKill(e, crit),
     };
@@ -201,6 +201,7 @@ export class Game {
 
   private applySettings() {
     this.audio.setVolume(this.settings.volume);
+    this.applyDifficulty();
     this.buildComposer();
     this.resize();
   }
@@ -214,12 +215,22 @@ export class Game {
     this.weapons.camera.updateProjectionMatrix();
   }
 
+  private get diff() { return DIFFICULTY[this.settings.difficulty]; }
+
+  /** Pushes the chosen difficulty into the systems that read it each frame. */
+  private applyDifficulty() {
+    this.player.regenTo = this.diff.regenTo;
+    this.enemyCtx.shotSpeed = this.diff.shotSpeed;
+    this.enemyCtx.slots = this.diff.slots + Math.floor(this.wave / 5);
+  }
+
   // ---------- flow ----------
   startRun() {
     this.audio.unlock();
     this.audio.startAmbient();
     this.enemies.clear(); this.projectiles.clear(); this.pickups.clear(); this.effects.clear();
     this.player.reset(); this.weapons.reset();
+    this.applyDifficulty();
     this.wave = 0; this.score = 0; this.kills = 0; this.lifesteal = 0; this.runTime = 0;
     this.queue = []; this.clearT = 0; this.intermission = 2.5;
     this.state = 'playing';
@@ -255,8 +266,9 @@ export class Game {
 
   private nextWave() {
     this.wave++;
+    this.applyDifficulty();
     const w = this.wave;
-    let budget = 4 + w * 3 + Math.floor(w * w * 0.12);
+    let budget = Math.round((3 + w * 2.6 + w * w * 0.14) * this.diff.budget);
     const q: EnemyType[] = [];
     let heavies = Math.floor(w / 4);
     if (w % 5 === 0) heavies++;
@@ -278,7 +290,7 @@ export class Game {
 
   private spawnNext() {
     const type = this.queue.shift()!;
-    const hp = 1 + 0.07 * (this.wave - 1), dmg = 1 + 0.04 * (this.wave - 1);
+    const hp = (1 + 0.06 * (this.wave - 1)) * this.diff.hp, dmg = (1 + 0.03 * (this.wave - 1)) * this.diff.dmg;
     if (type === 'drone') {
       const v = this.world.vents[(Math.random() * this.world.vents.length) | 0];
       this.enemies.spawn(type, tmpA.copy(v).add(tmpB.set(Math.random() - 0.5, 0, Math.random() - 0.5)), hp, dmg);
@@ -330,7 +342,7 @@ export class Game {
     this.audio.upgrade();
     this.ui.feed(`<b>${this.offers[i].name}</b> installed`);
     this.offers = [];
-    this.player.health = Math.min(this.player.maxHealth, this.player.health + 20);
+    this.player.health = Math.min(this.player.maxHealth, this.player.health + 25);
     this.intermission = 3.5;
     this.state = 'playing';
     this.ui.show(null);
@@ -349,7 +361,7 @@ export class Game {
       if (this.state !== 'dead') return;
       this.ui.showHud(false);
       this.ui.showGameOver([
-        ['Wave reached', String(this.wave)], ['Score', this.score.toLocaleString() + (this.score > best ? '  ★ new best' : '')],
+        ['Wave reached', `${this.wave}  ·  ${this.diff.label}`], ['Score', this.score.toLocaleString() + (this.score > best ? '  ★ new best' : '')],
         ['Robots destroyed', String(this.kills)], ['Time survived', `${m}:${String(s).padStart(2, '0')}`],
       ]);
     }, 1400);
@@ -385,12 +397,12 @@ export class Game {
     const drops = e.type === 'heavy' ? 3 : 1;
     for (let i = 0; i < drops; i++) {
       const r = Math.random(), hurt = this.player.health < this.player.maxHealth * 0.5;
-      const hp = hurt ? 0.2 : 0.09;
+      const k = this.diff.drops, hp = (hurt ? 0.2 : 0.09) * k;
       let kind = -1;
       if (r < hp) kind = PICKUP_HEALTH;
-      else if (r < hp + 0.17) kind = PICKUP_AMMO;
-      else if (r < hp + 0.23) kind = PICKUP_ARMOR;
-      else if (r < hp + 0.27) kind = PICKUP_GRENADE;
+      else if (r < hp + 0.17 * k) kind = PICKUP_AMMO;
+      else if (r < hp + 0.23 * k) kind = PICKUP_ARMOR;
+      else if (r < hp + 0.27 * k) kind = PICKUP_GRENADE;
       else if (e.type === 'heavy') kind = i === 0 ? PICKUP_HEALTH : PICKUP_AMMO;
       if (kind >= 0) this.pickups.spawn(kind, tmpA.set(p.x + (Math.random() - 0.5) * drops, 0.5, p.z + (Math.random() - 0.5) * drops));
     }
@@ -465,7 +477,7 @@ export class Game {
     this.runTime += dt;
     if (input.wasPressed('pause')) { this.pause(); return; }
 
-    p.update(dt, input, this.settings, w.ads, w.wantsFire);
+    p.update(dt, input, this.settings, w.ads, w.wantsFire, w.def.zoom);
     const e = w.ads * w.ads * (3 - 2 * w.ads);
     const base = this.settings.fov + (p.sprinting ? 4 : 0);
     // Zoom is applied to the tangent so it feels the same at any base FOV.

@@ -14,6 +14,18 @@ export const ACTION_LABELS: Record<Action, string> = {
 };
 
 export type Quality = 'low' | 'medium' | 'high';
+export type Difficulty = 'easy' | 'normal' | 'hard';
+
+/**
+ * Difficulty scales the robots, not the player's weapons, so gunplay feels the same on
+ * every setting. `slots` caps how many Troopers may be shooting at once; `regenTo` is the
+ * fraction of max health the player recovers to after a few seconds out of fire.
+ */
+export const DIFFICULTY: Record<Difficulty, { label: string; dmg: number; hp: number; budget: number; slots: number; regenTo: number; drops: number; shotSpeed: number }> = {
+  easy: { label: 'Easy', dmg: 0.6, hp: 0.85, budget: 0.8, slots: 1, regenTo: 1, drops: 1.4, shotSpeed: 0.88 },
+  normal: { label: 'Normal', dmg: 0.85, hp: 1, budget: 1, slots: 2, regenTo: 0.5, drops: 1, shotSpeed: 1 },
+  hard: { label: 'Hard', dmg: 1.2, hp: 1.15, budget: 1.25, slots: 3, regenTo: 0, drops: 0.8, shotSpeed: 1.1 },
+};
 
 export interface Settings {
   sensitivity: number;
@@ -21,6 +33,7 @@ export interface Settings {
   invertY: boolean;
   fov: number;
   quality: Quality;
+  difficulty: Difficulty;
   volume: number;
   adsToggle: boolean;
   scrollSwitch: boolean;
@@ -43,7 +56,7 @@ export function defaultBinds(): Record<Action, string[]> {
 
 export function defaults(): Settings {
   return {
-    sensitivity: 1.0, adsSensitivity: 0.7, invertY: false, fov: 75, quality: 'medium',
+    sensitivity: 1.0, adsSensitivity: 1.0, invertY: false, fov: 75, quality: 'medium', difficulty: 'normal',
     volume: 0.7, adsToggle: false, scrollSwitch: true, rawInput: true, showFps: false,
     damageNumbers: true, binds: defaultBinds(),
   };
@@ -51,8 +64,8 @@ export function defaults(): Settings {
 
 /** Preset that makes the game comfortable without a mouse. */
 export function applyTrackpadPreset(s: Settings) {
-  s.sensitivity = 1.8;
-  s.adsSensitivity = 0.8;
+  s.sensitivity = 3.3;
+  s.adsSensitivity = 1.0;
   s.adsToggle = true;
   s.scrollSwitch = false;
   s.rawInput = false;
@@ -60,7 +73,8 @@ export function applyTrackpadPreset(s: Settings) {
   s.binds.ads = ['Mouse2', 'KeyQ'];
 }
 
-const KEY = 'rustwake.settings.v1';
+// Bumped when the meaning of stored values changes (v2: sensitivity scale).
+const KEY = 'rustwake.settings.v2';
 
 export function loadSettings(): Settings {
   const s = defaults();

@@ -1,5 +1,5 @@
 import type { Input } from './input';
-import { ACTIONS, ACTION_LABELS, applyTrackpadPreset, codeLabel, defaults, saveSettings, type Settings } from './settings';
+import { ACTIONS, ACTION_LABELS, DIFFICULTY, applyTrackpadPreset, codeLabel, defaults, saveSettings, type Difficulty, type Settings } from './settings';
 import { WEAPONS, type WeaponSystem } from './weapons';
 
 const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
@@ -38,8 +38,22 @@ export class UI {
     on('btn-pause-settings', () => this.openSettings('pause'));
     on('btn-settings-back', () => this.show(this.settingsFrom));
     on('btn-trackpad', () => { applyTrackpadPreset(settings); this.commit(); this.buildSettings(); });
-    on('btn-defaults', () => { Object.assign(settings, defaults()); this.commit(); this.buildSettings(); });
+    on('btn-defaults', () => { Object.assign(settings, defaults()); this.commit(); this.buildSettings(); this.buildDifficulty(); });
     this.buildSlots();
+    this.buildDifficulty();
+  }
+
+  /** Difficulty picker on the title screen. */
+  private buildDifficulty() {
+    const el = $('difficulty');
+    el.innerHTML = '';
+    for (const d of Object.keys(DIFFICULTY) as Difficulty[]) {
+      const b = document.createElement('button');
+      b.textContent = DIFFICULTY[d].label;
+      b.classList.toggle('active', this.settings.difficulty === d);
+      b.addEventListener('click', () => { this.settings.difficulty = d; this.commit(); this.cb.click(); this.buildDifficulty(); });
+      el.append(b);
+    }
   }
 
   show(s: Screen | null) {
@@ -75,9 +89,17 @@ export class UI {
       r.append(i);
     };
 
+    head('GAME');
+    const dr = row('Difficulty (applies from the next wave)'), dsel = document.createElement('select');
+    for (const d of Object.keys(DIFFICULTY) as Difficulty[]) {
+      const o = document.createElement('option'); o.value = d; o.textContent = DIFFICULTY[d].label; o.selected = s.difficulty === d; dsel.append(o);
+    }
+    dsel.addEventListener('change', () => { s.difficulty = dsel.value as Difficulty; this.commit(); this.buildDifficulty(); });
+    dr.append(dsel);
+
     head('AIM');
-    slider('Look sensitivity', 'sensitivity', 0.2, 4, 0.05, (v) => v.toFixed(2));
-    slider('Aim-down-sights sensitivity', 'adsSensitivity', 0.2, 1.5, 0.05, (v) => v.toFixed(2));
+    slider('Look sensitivity', 'sensitivity', 0.2, 8, 0.05, (v) => v.toFixed(2));
+    slider('Aim sensitivity (1.0 = matched to zoom)', 'adsSensitivity', 0.3, 2, 0.05, (v) => v.toFixed(2));
     check('Invert vertical look', 'invertY');
     check('Toggle aim instead of hold', 'adsToggle');
     check('Scroll to switch weapons', 'scrollSwitch');

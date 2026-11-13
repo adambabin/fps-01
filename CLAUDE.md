@@ -59,3 +59,7 @@ g.simulate(1 / 60); g.input.endFrame();
 ```
 
 Set `g.test = false` between scripted steps to stop the real-time loop from also advancing the game. Launch Chromium with `--use-gl=angle --use-angle=swiftshader --enable-unsafe-swiftshader --ignore-gpu-blocklist` against `npm run preview`. Mouse feel, audio and real frame rates cannot be verified this way.
+
+## Balance
+
+Difficulty multipliers live in `DIFFICULTY` (`settings.ts`) and scale robots only, never the player's weapons. `scripts/balance-bot.cjs` plays whole runs per difficulty in seconds and prints the wave reached; re-run it after changing `ENEMY_DEFS`, robot damage values in `enemies.ts`, the wave budget in `nextWave()`, or `DIFFICULTY`. At skill 1 the bot currently reaches roughly wave 10 on Easy, 5 on Normal and 4 on Hard; it does not use cover or seek pickups, so treat that as a floor for a human.

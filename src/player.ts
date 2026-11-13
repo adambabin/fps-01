@@ -21,6 +21,8 @@ export class Player {
   maxArmor = 100;
   speedMult = 1;
   regen = 0;
+  /** Fraction of max health recovered automatically out of combat (set by difficulty). */
+  regenTo = 0;
   grounded = true;
   crouching = false;
   sprinting = false;
@@ -65,13 +67,17 @@ export class Player {
     return lost;
   }
 
-  update(dt: number, input: Input, settings: Settings, ads: number, wantsFire: boolean) {
+  update(dt: number, input: Input, settings: Settings, ads: number, wantsFire: boolean, zoom = 1) {
     // Look
-    const sens = settings.sensitivity * 0.0022 * (1 + (settings.adsSensitivity - 1) * ads) * (1 - ads * 0.25);
+    // While aiming, turn rate drops with the zoom so the same hand motion covers the same
+    // distance on screen; the ADS setting scales that matched rate.
+    const sens = settings.sensitivity * 0.0012 * (1 + (settings.adsSensitivity / zoom - 1) * ads);
     this.yaw -= input.dx * sens;
     this.pitch -= input.dy * sens * (settings.invertY ? -1 : 1);
     this.pitch = Math.max(-1.54, Math.min(1.54, this.pitch));
-    const rec = Math.exp(-9 * dt);
+    // Recoil settles slowly while the trigger is held, so sustained fire climbs and must
+    // be pulled down, then snaps back once you let go.
+    const rec = Math.exp(-(wantsFire ? 4.5 : 11) * dt);
     this.recoilPitch *= rec; this.recoilYaw *= rec;
 
     // Crouch
@@ -151,7 +157,11 @@ export class Player {
     this.shake *= Math.exp(-5 * dt);
     this.roll += (-r * 0.012 * (this.grounded ? 1 : 0.3) - this.roll) * Math.min(1, dt * 8);
     this.sinceHit += dt;
-    if (this.regen > 0 && this.sinceHit > 5 && this.health > 0) this.health = Math.min(this.maxHealth, this.health + this.regen * dt);
+    if (this.sinceHit > 5 && this.health > 0) {
+      if (this.regen > 0) this.health = Math.min(this.maxHealth, this.health + this.regen * dt);
+      const floor = this.maxHealth * this.regenTo;
+      if (this.health < floor) this.health = Math.min(floor, this.health + 7 * dt);
+    }
   }
 
   applyCamera(cam: THREE.PerspectiveCamera, ads: number) {

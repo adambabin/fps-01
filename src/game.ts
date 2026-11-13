@@ -201,7 +201,7 @@ export class Game {
 
     if (isTouchDevice()) {
       this.touch = new TouchControls(this.input);
-      document.querySelector('#menu .hint')!.textContent = 'Left thumb: move (push to the rim to sprint) · Right thumb: drag to look · Hold FIRE and drag to shoot while aiming · AIM toggles sights · Play in landscape';
+      document.querySelector('#menu .hint')!.textContent = 'Left thumb: move (push to the rim to sprint) · Right thumb: drag to look · Hold FIRE and drag to shoot while aiming · Hold AIM for sights (or set toggle aim in Settings) · Play in landscape';
       document.querySelector('#upgrade .hint')!.textContent = 'Tap a card · Taking three cards from one track unlocks a choice of its keystones ◆';
     }
     this.input.lookActive = () => this.state === 'playing' && this.locked();

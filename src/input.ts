@@ -50,7 +50,10 @@ export class Input {
       this.dy += e.movementY;
     });
     window.addEventListener('wheel', (e) => {
-      if (this.lookActive()) { this.wheel += e.deltaY; e.preventDefault(); }
+      if (!this.lookActive()) return;
+      // Firefox often reports lines or pages rather than pixels; convert so one notch is ~100 px everywhere.
+      this.wheel += e.deltaY * (e.deltaMode === 1 ? 33 : e.deltaMode === 2 ? 800 : 1);
+      e.preventDefault();
     }, { passive: false });
     window.addEventListener('contextmenu', (e) => e.preventDefault());
     window.addEventListener('blur', () => this.reset());

@@ -61,11 +61,11 @@ export function defaultBinds(): Record<Action, string[]> {
 }
 
 export function defaults(): Settings {
-  // Phones get a lighter renderer and toggle-aim (holding a second button is awkward on glass).
+  // Phones get a lighter renderer.
   const touch = isTouchDevice();
   return {
     sensitivity: 1.0, adsSensitivity: 1.0, invertY: false, fov: 75, quality: touch ? 'low' : 'medium', difficulty: 'normal', arena: 'reactor', rotate: true,
-    volume: 0.7, adsToggle: touch, scrollSwitch: true, rawInput: true, showFps: false,
+    volume: 0.7, adsToggle: false, scrollSwitch: true, rawInput: true, showFps: false,
     damageNumbers: true, binds: defaultBinds(),
   };
 }

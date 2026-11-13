@@ -32,6 +32,10 @@ interface Theme {
   outdoor?: boolean; sky?: number; weather?: 'rain' | 'snow'; floorRough?: number; env?: number;
   /** Reflections come from a room built out of this theme's own lamp colours instead of the neutral studio. */
   ownEnv?: boolean; grade?: Grade;
+  /** Tint of the drifting dust motes indoors. */
+  dust?: number;
+  /** Outdoor sky dome: colour overhead and at the horizon. */
+  skyTop?: number; skyHorizon?: number;
   /** Height of an outdoor arena's perimeter wall (default 5); raise it where upper levels would see over. */
   wallH?: number;
 }
@@ -48,21 +52,27 @@ const THEMES: Record<ArenaId, Theme> = {
   foundry: {
     floor: 0xd9c8b8, wall: 0xc9b29c, trim: 0xa89684, dark: 0x4a3f38,
     stripA: [3.6, 1.1, 0.2], stripB: [3.2, 2.0, 0.5], core: [4.2, 1.3, 0.15], panel: [3.0, 2.3, 1.6],
-    fog: 0x160d08, fogDensity: 0.019, hemiSky: 0xc9a988, hemiGround: 0x3a2618, hemi: 0.85, sun: 0xffd9b0, sunI: 1.25,
-    corners: [0xff8a3c, 0xffb46a], cornerI: 150, coreLight: 0xff6a1a, coreI: 150, coreY: 4.2,
+    fog: 0x140b06, fogDensity: 0.023, hemiSky: 0xc9a988, hemiGround: 0x3a2618, hemi: 0.4, sun: 0xffd9b0, sunI: 0.85,
+    corners: [0xff8a3c, 0xffb46a], cornerI: 230, coreLight: 0xff6a1a, coreI: 220, coreY: 4.2,
+    ownEnv: true, env: 0.7, dust: 0xffb070,
+    grade: { shadows: [0.92, 0.97, 1.08], highlights: [1.1, 1.0, 0.86], saturation: 1.1, contrast: 1.07, vignette: 0.26 },
   },
   vault: {
     floor: 0xc4d2e0, wall: 0xb4c4d6, trim: 0xa9b6c4, dark: 0x343b46,
     stripA: [0.5, 2.6, 3.4], stripB: [0.4, 3.0, 1.2], core: [1.6, 2.6, 3.6], panel: [2.2, 2.9, 3.4],
-    fog: 0x070c14, fogDensity: 0.021, hemiSky: 0x9cc0ea, hemiGround: 0x1c2630, hemi: 0.95, sun: 0xcfe4ff, sunI: 1.15,
-    corners: [0x6fb6ff, 0x8fe0ff], cornerI: 120, coreLight: 0x9fdcff, coreI: 80, coreY: 3.4,
+    fog: 0x060a12, fogDensity: 0.024, hemiSky: 0x9cc0ea, hemiGround: 0x1c2630, hemi: 0.42, sun: 0xcfe4ff, sunI: 0.85,
+    corners: [0x6fb6ff, 0x8fe0ff], cornerI: 200, coreLight: 0x9fdcff, coreI: 140, coreY: 3.4,
+    ownEnv: true, env: 0.75,
+    grade: { shadows: [0.84, 0.96, 1.14], highlights: [0.98, 1.0, 1.05], saturation: 1.05, contrast: 1.07, vignette: 0.26 },
   },
   yard: {
     floor: 0x6f757d, wall: 0x9aa0a8, trim: 0xb4bac2, dark: 0x3a3e46,
     stripA: [3.4, 2.6, 1.2], stripB: [0.5, 2.2, 3.2], core: [3.2, 2.9, 2.2], panel: [2.6, 2.7, 3.0],
-    fog: 0x0b1017, fogDensity: 0.024, hemiSky: 0x7f95b8, hemiGround: 0x20242a, hemi: 0.75, sun: 0xa9bfe8, sunI: 0.9,
+    fog: 0x0b1017, fogDensity: 0.024, hemiSky: 0x7f95b8, hemiGround: 0x20242a, hemi: 0.7, sun: 0xa9bfe8, sunI: 1.05,
     corners: [0xfff0d0, 0xdfe9ff], cornerI: 230, coreLight: 0xfff2d8, coreI: 130, coreY: 7,
-    outdoor: true, sky: 0x0b1017, weather: 'rain', floorRough: 0.5, env: 0.5, wallH: 9,
+    outdoor: true, sky: 0x0b1017, weather: 'rain', floorRough: 0.5, env: 0.85, wallH: 9,
+    ownEnv: true, skyTop: 0x04060a, skyHorizon: 0x303b4b,
+    grade: { shadows: [0.86, 0.97, 1.1], highlights: [1.05, 1.0, 0.94], saturation: 0.95, contrast: 1.08, vignette: 0.28 },
   },
   frost: {
     floor: 0xf4f7fb, wall: 0xc9d2dc, trim: 0xd9e0e8, dark: 0x4b535e,
@@ -70,7 +80,8 @@ const THEMES: Record<ArenaId, Theme> = {
     // Kept dim on purpose: lit snow must stay below the bloom threshold (1.0) or it glows and washes out the view.
     fog: 0x8e9bab, fogDensity: 0.016, hemiSky: 0xb8c6d6, hemiGround: 0x5a6573, hemi: 0.75, sun: 0xfff1de, sunI: 1.25,
     corners: [0xfff2e0, 0xe6f0ff], cornerI: 45, coreLight: 0xff5a40, coreI: 40, coreY: 8,
-    outdoor: true, sky: 0x8e9bab, weather: 'snow', env: 0.3,
+    outdoor: true, sky: 0x8e9bab, weather: 'snow', env: 0.3, skyTop: 0x737f8e, skyHorizon: 0xa3aebb,
+    grade: { shadows: [0.92, 0.98, 1.08], highlights: [1.0, 1.0, 1.0], saturation: 0.92, contrast: 1.06, vignette: 0.18 },
   },
 };
 
@@ -188,7 +199,7 @@ export class World {
   /** Neutral studio reflections; the weapon viewmodel always uses these so it reads the same in every arena. */
   readonly studioEnv: THREE.Texture;
   private signs = new Map<string, THREE.Material>();
-  private fx: { stain: THREE.MeshBasicMaterial; shaft: THREE.ShaderMaterial; screen: THREE.MeshBasicMaterial; inlay: THREE.MeshBasicMaterial };
+  private fx: { stain: THREE.MeshBasicMaterial; shaft: THREE.ShaderMaterial; screen: THREE.MeshBasicMaterial; inlay: THREE.MeshBasicMaterial; sky: THREE.MeshBasicMaterial };
   private m: {
     floor: THREE.MeshStandardMaterial; wall: THREE.MeshStandardMaterial; pillar: THREE.MeshStandardMaterial;
     crate: THREE.MeshStandardMaterial; crate2: THREE.MeshStandardMaterial; contA: THREE.MeshStandardMaterial; contB: THREE.MeshStandardMaterial;
@@ -223,6 +234,7 @@ export class World {
     this.fx = {
       stain: flat(makeStainTexture(), 0.62),
       shaft: shaftMaterial(), screen: glow(1, 1, 1), inlay: glow(1, 1, 1),
+      sky: new THREE.MeshBasicMaterial({ vertexColors: true, side: THREE.BackSide, fog: false, depthWrite: false }),
     };
     this.m = {
       floor: w(std(floorMaps, 0.6)), wall: w(std(wallMaps, 0.4)), pillar: w(std(wallMaps, 0.45, 0xa4aab2)),
@@ -307,6 +319,7 @@ export class World {
     this.weather = t.weather ?? 'none';
     this.rain.visible = t.weather === 'rain'; this.snowfall.visible = t.weather === 'snow';
     this.dust.visible = !t.outdoor;
+    (this.dust.material as THREE.PointsMaterial).color.setHex(t.dust ?? 0x9fb4c8);
     this.corners.forEach((l) => l.position.setY(t.outdoor ? 8.5 : 6.5));
     this.fog.color.setHex(t.fog); this.fog.density = t.fogDensity;
     this.hemi.color.setHex(t.hemiSky); this.hemi.groundColor.setHex(t.hemiGround); this.hemi.intensity = t.hemi;
@@ -339,7 +352,9 @@ export class World {
       const c = Math.abs(k) % 2 ? t.stripA : t.stripB;
       add(c, k * 6.2, 3.1, 29.5 * sgn, 2.6, 0.5, 0.2); add(c, 29.5 * sgn, 3.1, k * 6.2, 0.2, 0.5, 2.6);
     }
-    for (let x = -18; x <= 18; x += 12) for (let z = -18; z <= 18; z += 12) add(t.panel, x, 7.4, z, 3.2, 0.1, 1.1);
+    // Outdoors there is no lit ceiling to reflect, only the floodlights in the corners.
+    if (!t.outdoor) for (let x = -18; x <= 18; x += 12) for (let z = -18; z <= 18; z += 12) add(t.panel, x, 7.4, z, 3.2, 0.1, 1.1);
+    else for (const qx of [1, -1]) for (const qz of [1, -1]) add(t.panel, 26 * qx, 7.2, 26 * qz, 1.5, 0.5, 1.5);
     const warm = new THREE.Color(t.corners[0]), cool = new THREE.Color(t.corners[1]);
     for (const [x, z, c] of [[19, 19, warm], [-19, -19, warm], [-19, 19, cool], [19, -19, cool]] as const) add([c.r * 1.4, c.g * 1.4, c.b * 1.4], x, 5, z, 5, 3, 5);
     const pmrem = new THREE.PMREMGenerator(this.renderer);
@@ -597,8 +612,7 @@ export class World {
   /** Non-colliding detail for the Reactor Hall. Nothing here changes cover, paths or sightlines at ground level. */
   private dressReactor() {
     const H = CEIL, A = ARENA, m = this.m, f = this.fx, V = (x: number, y: number, z: number) => new THREE.Vector3(x, y, z);
-    let seed = 7;
-    const r = () => { seed = (seed * 1664525 + 1013904223) >>> 0; return seed / 4294967296; };
+    const r = this.rng(7);
     this.shafts();
 
     // Core: housings, glowing collars, a ring inlaid in the floor and coolant lines out to the pillars.
@@ -616,7 +630,28 @@ export class World {
       this.d(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts), 24, 0.035, 6), m.dark, 0, 0, 0);
     }
 
-    // Cable channels in the floor from the core toward each gate, with a guide light down the middle.
+    this.channels();
+    this.dressWalls(r, 'REACTOR HALL 01', 'COOLANT LOOP', 'HIGH VOLTAGE');
+
+    this.ducts([-9, 9]);
+
+    for (const qx of [1, -1]) for (const qz of [1, -1]) {
+      // Pillar collars and a conduit up one face.
+      for (const y of [2.1, 6.0]) this.dbox(13 * qx, y, 13 * qz, 2.62, 0.22, 2.62, m.trim, false);
+      this.dbox(13 * qx + 1.24 * qx, 5.4, 13 * qz + 0.75 * qz, 0.1, 5.2, 0.16, m.dark, false);
+      this.frame(24 * qx, 14 * qz, 2.6, 6.2); this.frame(14 * qx, 24.5 * qz, 6.2, 2.6);
+    }
+
+    this.stains(r, [[20.5, 21], [6.5, 19], [19, 5.5], [13, 13], [24, 14], [14, 24.5], [7, 6.5]], 46);
+  }
+
+  private rng(seed: number) {
+    return () => { seed = (seed * 1664525 + 1013904223) >>> 0; return seed / 4294967296; };
+  }
+
+  /** Cable channels in the floor from the centre toward each gate, with a guide light down the middle. */
+  private channels() {
+    const m = this.m, f = this.fx;
     for (const [ax, sgn] of [[0, 1], [0, -1], [1, 1], [1, -1]] as const) {
       const c = 14.6 * sgn, L = 21.8;
       if (ax === 0) { this.dbox(c, 0, 0, L, 0.02, 0.7, m.dark, false); this.dbox(c, 0.002, 0, L, 0.02, 0.05, f.inlay, false); }
@@ -625,8 +660,12 @@ export class World {
         if (ax === 0) this.dbox(k * sgn, 0.004, 0, 0.12, 0.02, 0.9, m.trim, false); else this.dbox(0, 0.004, k * sgn, 0.9, 0.02, 0.12, m.trim, false);
       }
     }
+  }
 
-    // Walls: buttresses carrying the pipe run, vents, consoles, lettering and leak stains.
+  /** Perimeter walls: buttresses, vents, consoles, lettering and leak stains. Flat against the wall, so nothing to collide with. */
+  private dressWalls(r: () => number, title: string, bay: string, warning: string) {
+    const A = ARENA, m = this.m, f = this.fx, out = !!this.theme.outdoor, top = out ? Math.min(6, this.theme.wallH ?? 5) : 6;
+    const V = (x: number, y: number, z: number) => new THREE.Vector3(x, y, z);
     const names = ['NORTH', 'SOUTH', 'WEST', 'EAST'];
     [[0, -1], [0, 1], [1, -1], [1, 1]].forEach(([ax, sgn], wi) => {
       // (c, depth) -> world position for something `depth` metres in from this wall at `c` along it.
@@ -635,12 +674,12 @@ export class World {
       const ry = ax === 0 ? (sgn > 0 ? Math.PI : 0) : sgn > 0 ? -Math.PI / 2 : Math.PI / 2;
       for (const c of [-27.6, -21.7, -15.5, -9.3, 9.3, 15.5, 21.7, 27.6]) {
         const [x, z] = at(c, 0.17), [sx, sz] = size(0.55, 0.34);
-        this.dbox(x, 3, z, sx, 6, sz, m.pillar, false, 2.4);
-        const [bx, bz] = at(c, 0.32), [bsx, bsz] = size(0.4, 0.64);
-        this.dbox(bx, 6.02, bz, bsx, 0.14, bsz, m.dark, false);
+        this.dbox(x, top / 2, z, sx, top, sz, m.pillar, false, 2.4);
+        // Indoors the buttress ends in a bracket under the pipe run.
+        if (!out) { const [bx, bz] = at(c, 0.32), [bsx, bsz] = size(0.4, 0.64); this.dbox(bx, 6.02, bz, bsx, 0.14, bsz, m.dark, false); }
         const [kx, kz] = at(c, 0.2), [ksx, ksz] = size(0.75, 0.4);
         this.dbox(kx, 0.45, kz, ksx, 0.9, ksz, m.dark, false);
-        if (r() < 0.6) { const [lx, lz] = at(c + (r() - 0.5) * 3, 0.012); this.d(new THREE.PlaneGeometry(0.5 + r() * 0.5, 2.5 + r() * 2.5), f.stain, lx, 3.6 + r(), lz, { ry, cast: false }); }
+        if (r() < 0.6) { const [lx, lz] = at(c + (r() - 0.5) * 3, 0.012), h = Math.min(2.5 + r() * 2.5, top - 1); this.d(new THREE.PlaneGeometry(0.5 + r() * 0.5, h), f.stain, lx, 1.2 + h / 2 + r() * 0.4, lz, { ry, cast: false }); }
       }
       for (const c of [-12.4, 12.4]) {
         const [x, z] = at(c, 0.06), [sx, sz] = size(1.7, 0.12);
@@ -655,43 +694,59 @@ export class World {
         const [gx, gz] = at(c - 0.3, 0.29), [gsx, gsz] = size(0.95, 0.02);
         this.dbox(gx, 1.75, gz, gsx, 0.55, gsz, f.screen, false);
         for (let i = 0; i < 3; i++) { const [ix, iz] = at(c + 0.55, 0.29), [isx, isz] = size(0.22, 0.02); this.dbox(ix, 1.95 - i * 0.2, iz, isx, 0.06, isz, i === 1 ? m.stripB : f.screen, false); }
-        this.dpipe(V(...([at(c + 0.7, 0.1)[0], 2.2, at(c + 0.7, 0.1)[1]] as [number, number, number])), V(...([at(c + 0.7, 0.1)[0], 4.35, at(c + 0.7, 0.1)[1]] as [number, number, number])), 0.05, m.trim, false);
+        const [px, pz] = at(c + 0.7, 0.1);
+        this.dpipe(V(px, 2.2, pz), V(px, 4.35, pz), 0.05, m.trim, false);
       }
       const [sgx, sgz] = at(0, 0.47);
       this.sign('GATE ' + names[wi], sgx, 3.9, sgz, 2.4, ry);
-      for (const c of [-24.8, 24.8]) { const [x, z] = at(c, 0.012); this.sign(c < 0 ? 'REACTOR HALL 01' : 'COOLANT LOOP ' + (wi + 1), x, 2.9, z, 3.4, ry); }
-      for (const c of [-6.2, 6.2]) { const [x, z] = at(c, 0.012); this.sign(c < 0 ? 'CAUTION' : 'HIGH VOLTAGE', x, 3.15, z, 1.9, ry, '#c79a1c'); }
+      for (const c of [-24.8, 24.8]) { const [x, z] = at(c, 0.012); this.sign(c < 0 ? title : bay + ' ' + (wi + 1), x, 2.9, z, 3.4, ry); }
+      for (const c of [-6.2, 6.2]) { const [x, z] = at(c, 0.012); this.sign(c < 0 ? 'CAUTION' : warning, x, 3.15, z, 1.9, ry, '#c79a1c'); }
     });
+  }
 
-    // Ceiling: ducts on hangers and housings around the lamps.
-    for (const z of [-9, 9]) {
-      this.dbox(0, 8.25, z, A * 2 - 1, 0.6, 1.0, m.trim, false, 3);
-      for (let x = -27; x <= 27; x += 6) { this.dbox(x, 8.25, z, 0.14, 0.68, 1.1, m.dark, false); this.dbox(x, 8.8, z, 0.08, 0.5, 0.08, m.dark, false); }
-      for (const x of [-15, 3, 21]) this.dbox(x, 7.9, z, 1.2, 0.12, 0.8, m.dark, false);
+  /** Corner posts and top and bottom rails around a container-sized box of height `h` standing on `y0`. */
+  private frame(cx: number, cz: number, sx: number, sz: number, y0 = 0, h = 2.6) {
+    const m = this.m;
+    for (const ex of [-1, 1]) for (const ez of [-1, 1]) this.dbox(cx + ex * (sx / 2 - 0.04), y0 + h / 2, cz + ez * (sz / 2 - 0.04), 0.16, h + 0.06, 0.16, m.dark);
+    for (const y of [y0 + 0.07, y0 + h - 0.04]) {
+      for (const ex of [-1, 1]) this.dbox(cx + ex * (sx / 2 - 0.03), y, cz, 0.12, 0.14, sz, m.dark);
+      for (const ez of [-1, 1]) this.dbox(cx, y, cz + ez * (sz / 2 - 0.03), sx, 0.14, 0.12, m.dark);
     }
+  }
 
-    for (const qx of [1, -1]) for (const qz of [1, -1]) {
-      // Pillar collars and a conduit up one face.
-      for (const y of [2.1, 6.0]) this.dbox(13 * qx, y, 13 * qz, 2.62, 0.22, 2.62, m.trim, false);
-      this.dbox(13 * qx + 1.24 * qx, 5.4, 13 * qz + 0.75 * qz, 0.1, 5.2, 0.16, m.dark, false);
-      // Container frames: corner posts and rails.
-      for (const [cx, cz, sx, sz] of [[24 * qx, 14 * qz, 2.6, 6.2], [14 * qx, 24.5 * qz, 6.2, 2.6]]) {
-        for (const ex of [-1, 1]) for (const ez of [-1, 1]) this.dbox(cx + ex * (sx / 2 - 0.04), 1.3, cz + ez * (sz / 2 - 0.04), 0.16, 2.66, 0.16, m.dark);
-        for (const y of [0.07, 2.56]) {
-          for (const ex of [-1, 1]) this.dbox(cx + ex * (sx / 2 - 0.03), y, cz, 0.12, 0.14, sz, m.dark);
-          for (const ez of [-1, 1]) this.dbox(cx, y, cz + ez * (sz / 2 - 0.03), sx, 0.14, 0.12, m.dark);
-        }
-      }
-    }
-
-    // Oil and scorch stains on the floor, heavier around the cover.
-    const spots: [number, number][] = [[20.5, 21], [6.5, 19], [19, 5.5], [13, 13], [24, 14], [14, 24.5], [7, 6.5]];
-    for (let i = 0; i < 46; i++) {
-      const near = i < 30, sp = spots[i % spots.length];
+  /** Stains on the floor: most gather around `spots` (mirrored into all four quadrants), the rest are scattered. */
+  private stains(r: () => number, spots: [number, number][], count: number) {
+    for (let i = 0; i < count; i++) {
+      const near = i < count * 0.65, sp = spots[i % spots.length];
       const x = near ? sp[0] * (r() < 0.5 ? 1 : -1) + (r() - 0.5) * 5 : (r() - 0.5) * 54;
       const z = near ? sp[1] * (r() < 0.5 ? 1 : -1) + (r() - 0.5) * 5 : (r() - 0.5) * 54;
       const sz = 1.2 + r() * 3.2;
-      this.d(new THREE.PlaneGeometry(sz, sz * (0.6 + r() * 0.8)), f.stain, x, 0.006 + i * 0.0001, z, { rx: -Math.PI / 2, ry: r() * 6.28, cast: false });
+      this.d(new THREE.PlaneGeometry(sz, sz * (0.6 + r() * 0.8)), this.fx.stain, x, 0.006 + i * 0.0001, z, { rx: -Math.PI / 2, ry: r() * 6.28, cast: false });
+    }
+  }
+
+  /** Sky dome for outdoor arenas: a vertical gradient from the horizon colour up to the colour overhead. */
+  private sky() {
+    const t = this.theme, g = new THREE.SphereGeometry(150, 32, 12, 0, Math.PI * 2, 0, Math.PI / 2 + 0.12);
+    const pos = g.attributes.position as THREE.BufferAttribute, col = new Float32Array(pos.count * 3);
+    const top = new THREE.Color(t.skyTop ?? t.sky ?? 0), hor = new THREE.Color(t.skyHorizon ?? t.sky ?? 0), c = new THREE.Color();
+    for (let i = 0; i < pos.count; i++) {
+      c.copy(hor).lerp(top, Math.pow(Math.max(0, pos.getY(i) / 150), 0.45));
+      col[i * 3] = c.r; col[i * 3 + 1] = c.g; col[i * 3 + 2] = c.b;
+    }
+    g.setAttribute('color', new THREE.BufferAttribute(col, 3));
+    const mesh = new THREE.Mesh(g, this.fx.sky);
+    mesh.renderOrder = -1; mesh.frustumCulled = false; mesh.matrixAutoUpdate = false;
+    this.group.add(mesh);
+  }
+
+  /** Ceiling ducts on hangers, running along x at each given z. */
+  private ducts(zs: number[]) {
+    const A = ARENA, m = this.m;
+    for (const z of zs) {
+      this.dbox(0, 8.25, z, A * 2 - 1, 0.6, 1.0, m.trim, false, 3);
+      for (let x = -27; x <= 27; x += 6) { this.dbox(x, 8.25, z, 0.14, 0.68, 1.1, m.dark, false); this.dbox(x, 8.8, z, 0.08, 0.5, 0.08, m.dark, false); }
+      for (const x of [-15, 3, 21]) this.dbox(x, 7.9, z, 1.2, 0.12, 0.8, m.dark, false);
     }
   }
 
@@ -736,6 +791,7 @@ export class World {
       this.vents.push(new THREE.Vector3(11 * qx, H - 1.6, 6 * qz));
     }
     for (const s of [1, -1]) this.barrier(17 * s, 0, 0.5, 6);
+    this.dressFoundry();
   }
 
   private buildVault() {
@@ -768,6 +824,7 @@ export class World {
       this.vents.push(new THREE.Vector3(8.5 * qx, H - 1.6, 13.5 * qz));
     }
     for (const s of [1, -1]) this.barrier(0, 13.5 * s, 4, 0.5);
+    this.dressVault();
   }
 
   /**
@@ -781,6 +838,7 @@ export class World {
       for (let i = 0; i < stack; i++) {
         this.box(x, 1.3 + i * 2.6, z, alongX ? 6.2 : 2.6, 2.6, alongX ? 2.6 : 6.2, mat, { tex: 2.6 });
         this.lamp(x + (alongX ? 0 : 1.31), 2.3 + i * 2.6, z + (alongX ? 1.31 : 0), alongX ? 0.5 : 0.03, 0.08, alongX ? 0.03 : 0.5, m.stripA);
+        this.frame(x, z, alongX ? 6.2 : 2.6, alongX ? 2.6 : 6.2, i * 2.6);
       }
     };
     // Hauler: cab and trailer
@@ -815,6 +873,7 @@ export class World {
     }
     this.deck(0, 0, 19.8, 2.2, L3);
     for (const s of [1, -1]) { this.barrier(17 * s, 0, 0.6, 5); this.barrier(0, 15 * s, 4.5, 0.6); }
+    this.dressYard();
   }
 
   /** Snowed-in outpost: prefab huts, fuel tanks, snow banks and a radio mast. */
@@ -853,6 +912,145 @@ export class World {
       this.box(0, 0.5, 14 * s, 5, 1.0, 1.5, m.snow, { tex: 2 });
       this.box(15.5 * s, 0.5, 0, 1.5, 1.0, 5, m.snow, { tex: 2 });
     }
+    this.dressFrost();
+  }
+
+  /** Non-colliding detail for the Foundry. */
+  private dressFoundry() {
+    const H = CEIL, m = this.m, f = this.fx, r = this.rng(19), V = (x: number, y: number, z: number) => new THREE.Vector3(x, y, z);
+    this.shafts();
+    this.dressWalls(r, 'FOUNDRY 02', 'CASTING LINE', 'HOT METAL');
+    this.ducts([-15, 15]);
+    // Crucible: hazard ring on the floor, crane rails and end trucks, chains hanging from the roof.
+    this.d(new THREE.RingGeometry(3.7, 4.1, 48), m.hazard, 0, 0.01, 0, { rx: -Math.PI / 2, cast: false });
+    this.d(new THREE.TorusGeometry(2.92, 0.05, 8, 8), m.core, 0, 2.3, 0, { rx: Math.PI / 2, ry: Math.PI / 8, cast: false });
+    for (const z of [-0.62, 0.62]) this.dbox(0, 7.52, z, 30, 0.16, 0.14, m.dark, false);
+    for (const x of [-15, 15]) { this.dbox(x, 7.1, 0, 0.5, 1.1, 1.8, m.dark, false); this.dbox(x, 8.3, 0, 0.3, 1.4, 0.3, m.dark, false); }
+    for (const [x, z, y] of [[-6, 3, 5.6], [6, -3, 6.2], [-4, -5, 6.6], [5, 5, 5.9]]) {
+      this.dpipe(V(x, H, z), V(x, y, z), 0.03, m.dark, false);
+      this.d(new THREE.TorusGeometry(0.16, 0.04, 6, 12), m.trim, x, y - 0.14, z, { cast: false });
+    }
+    for (const qx of [1, -1]) for (const qz of [1, -1]) {
+      const fx = 15.5 * qx, fz = 21 * qz;
+      // Furnace: hood over the mouth, gauge panel, feed pipes to the roof, soot on the floor in front.
+      this.dbox(fx, 2.62, fz - 2.3 * qz, 3.2, 0.22, 0.7, m.dark);
+      this.dbox(fx + 2.05, 3.1, fz - 2.04 * qz, 0.7, 0.6, 0.1, m.dark, false);
+      this.dbox(fx + 2.05, 3.15, fz - 2.1 * qz, 0.5, 0.26, 0.02, f.screen, false);
+      for (const o of [-2.1, 2.1]) {
+        this.dpipe(V(fx + o, 4.3, fz + 1.2 * qz), V(fx + o, H, fz + 1.2 * qz), 0.16, m.trim);
+        this.d(new THREE.CylinderGeometry(0.22, 0.22, 0.2, 12), m.dark, fx + o, 6.4, fz + 1.2 * qz);
+      }
+      this.d(new THREE.PlaneGeometry(4.6, 3.4), f.stain, fx, 0.008, fz - 3.6 * qz, { rx: -Math.PI / 2, cast: false });
+      // Conveyor side rails and legs.
+      for (const o of [-0.74, 0.74]) this.dbox(9 * qx, 1.12, 12 * qz + o, 10, 0.12, 0.08, m.dark, false);
+      for (let k = -4; k <= 4; k += 2) this.dbox(9 * qx + k, 1.07, 12 * qz, 0.1, 0.05, 1.3, m.trim, false);
+      // Pillar collars.
+      for (const y of [2.1, 6.0]) this.dbox(23.5 * qx, y, 13.5 * qz, 2.62, 0.22, 2.62, m.trim, false);
+    }
+    this.stains(r, [[15.5, 17.5], [9, 12], [8, 6], [22.5, 7], [23.5, 13.5], [3, 4]], 50);
+  }
+
+  /** Non-colliding detail for the Server Vault. */
+  private dressVault() {
+    const H = CEIL, m = this.m, f = this.fx, r = this.rng(31), V = (x: number, y: number, z: number) => new THREE.Vector3(x, y, z);
+    this.shafts();
+    this.channels();
+    this.dressWalls(r, 'SERVER VAULT 03', 'RACK ROW', 'STATIC HAZARD');
+    this.ducts([-4.5, 4.5]);
+    // Data core: housings, glowing collars and a ring inlaid in the floor.
+    this.d(new THREE.CylinderGeometry(1.0, 1.2, 0.5, 6), m.trim, 0, 1.05, 0);
+    this.d(new THREE.CylinderGeometry(1.25, 0.95, 0.7, 6), m.dark, 0, H - 0.35, 0);
+    for (const y of [2.6, 4.6, 6.6]) this.d(new THREE.TorusGeometry(0.98, 0.035, 8, 32), m.core, 0, y, 0, { rx: Math.PI / 2, cast: false });
+    this.d(new THREE.RingGeometry(2.6, 2.72, 48), f.inlay, 0, 0.012, 0, { rx: -Math.PI / 2, cast: false });
+    for (const x of [-16, -11, -6, 6, 11, 16]) {
+      // Cable tray over each column of racks, with drops into every rack.
+      this.dbox(x, 3.95, 0, 0.5, 0.08, 52, m.dark, false);
+      for (const z of [-19, -8, 8, 19]) {
+        for (const o of [-2.4, 0, 2.4]) this.dbox(x, 3.62, z + o, 0.07, 0.6, 0.07, m.dark, false);
+        for (const e of [-1, 1]) this.dbox(x, 1.62, z + e * 3.53, 1.3, 3.28, 0.08, m.trim);
+        // Status lights scattered over both faces.
+        for (let i = 0; i < 12; i++) {
+          const side = i % 2 ? 1 : -1, c = r();
+          this.dbox(x + 0.615 * side, 0.35 + r() * 2.7, z + (r() - 0.5) * 6.4, 0.02, 0.035, 0.05, c < 0.5 ? f.screen : c < 0.85 ? m.stripB : m.red, false);
+        }
+      }
+    }
+    for (const z of [-13.5, 13.5]) for (let x = -18; x <= 18; x += 6) this.dbox(x, 8.35, z, 0.08, 1.3, 0.08, m.dark, false);
+    for (const qx of [1, -1]) for (const qz of [1, -1]) {
+      // Cooling units: fan housing on top and coolant lines back to the wall.
+      this.d(new THREE.CylinderGeometry(0.95, 0.95, 0.3, 20), m.dark, 24.5 * qx, 2.55, 25 * qz);
+      this.d(new THREE.CylinderGeometry(0.7, 0.7, 0.06, 20), m.trim, 24.5 * qx, 2.72, 25 * qz, { cast: false });
+      for (const y of [0.6, 1.5]) this.dpipe(V(26.2 * qx, y, 25.6 * qz), V(29.9 * qx, y, 25.6 * qz), 0.09, m.trim);
+      this.frame(24.5 * qx, 25 * qz, 3.4, 3, 0, 2.4);
+    }
+    this.stains(r, [[24.5, 22], [11, 13.5], [6, 0]], 16);
+  }
+
+  /** Non-colliding detail for the Rain Yard. */
+  private dressYard() {
+    const m = this.m, f = this.fx, r = this.rng(43), V = (x: number, y: number, z: number) => new THREE.Vector3(x, y, z);
+    this.sky();
+    this.dressWalls(r, 'FREIGHT YARD 04', 'BAY', 'KEEP CLEAR');
+    // Floodlight beams from the corner towers.
+    for (const qx of [1, -1]) for (const qz of [1, -1])
+      this.d(new THREE.CylinderGeometry(0.8, 6.5, 8.6, 24, 1, true), f.shaft, 25.4 * qx, 4.4, 25.4 * qz, { cast: false });
+    // Hauler: wheels, bumper, exhaust stacks and mirrors.
+    for (const sx of [1, -1]) {
+      for (const z of [-4.2, -2.9, 0.4, 3.3]) this.d(new THREE.CylinderGeometry(0.52, 0.52, 0.36, 16), m.dark, 1.2 * sx, 0.52, z, { rz: Math.PI / 2 });
+      this.dpipe(V(1.12 * sx, 2.5, 1.85), V(1.12 * sx, 3.7, 1.85), 0.09, m.trim);
+      this.dbox(1.42 * sx, 1.9, 4.1, 0.08, 0.4, 0.25, m.dark, false);
+    }
+    this.dbox(0, 0.5, 4.5, 2.7, 0.28, 0.22, m.dark);
+    this.dbox(0, 2.62, 3.2, 2.3, 0.1, 2.2, m.dark, false);
+    // Worn lane paint down the two side lanes and across the gate lanes.
+    for (const s of [1, -1]) {
+      for (let k = -24; k <= 24; k += 4) { this.dbox(16 * s, 0.003, k, 0.16, 0.02, 2.2, m.trim, false); this.dbox(k, 0.003, 27 * s, 2.2, 0.02, 0.16, m.trim, false); }
+    }
+    // Puddles and oil.
+    this.stains(r, [[16, 4.5], [5.5, 11.5], [11, 14], [21, 17], [3, 6], [17, 0]], 44);
+  }
+
+  /** Non-colliding detail for the Frost Outpost. */
+  private dressFrost() {
+    const A = ARENA, m = this.m, r = this.rng(57), V = (x: number, y: number, z: number) => new THREE.Vector3(x, y, z);
+    this.sky();
+    this.dressWalls(r, 'OUTPOST 05', 'SECTOR', 'ICE HAZARD');
+    // Mast: guy wires to snow-covered anchors, and a dish.
+    for (const qx of [1, -1]) for (const qz of [1, -1]) {
+      this.dpipe(V(0.4 * qx, 10.5, 0.4 * qz), V(6.5 * qx, 0.2, 6.5 * qz), 0.02, m.dark, false);
+      this.dbox(6.5 * qx, 0.15, 6.5 * qz, 0.5, 0.3, 0.5, m.dark);
+      this.dbox(6.5 * qx, 0.33, 6.5 * qz, 0.56, 0.08, 0.56, m.snow, false);
+    }
+    this.d(new THREE.CylinderGeometry(0.55, 0.12, 0.3, 16), m.trim, 0.75, 8.6, 0, { rz: -Math.PI / 2 });
+    for (const qx of [1, -1]) for (const qz of [1, -1]) {
+      const hx = 15 * qx, hz = 16 * qz;
+      // Hut: frame, chimney, door canopy and window surrounds.
+      this.frame(hx, hz, 6, 4.4, 0, 3);
+      this.dpipe(V(hx + 2 * qx, 3.2, hz + 1.2 * qz), V(hx + 2 * qx, 4.5, hz + 1.2 * qz), 0.14, m.dark);
+      this.d(new THREE.CylinderGeometry(0.24, 0.24, 0.08, 12), m.snow, hx + 2 * qx, 4.54, hz + 1.2 * qz, { cast: false });
+      this.dbox(hx, 2.3, hz - 2.5 * qz, 1.5, 0.1, 0.6, m.dark);
+      this.dbox(hx, 2.4, hz - 2.5 * qz, 1.56, 0.1, 0.66, m.snow, false);
+      for (const o of [-1.6, 1.6]) {
+        this.dbox(hx + o, 1.9, hz - 2.215 * qz, 1.36, 0.86, 0.03, m.dark, false);
+        this.dbox(hx + o, 1.5, hz - 2.28 * qz, 1.4, 0.06, 0.14, m.snow, false);
+      }
+      // Fuel tank: saddles, bands, a valve and a line running to the hut.
+      const tx = 24 * qx, tz = 6 * qz;
+      for (const o of [-1.4, 1.4]) { this.dbox(tx, 0.5, tz + o, 2.0, 1.0, 0.3, m.dark); this.d(new THREE.TorusGeometry(1.12, 0.04, 6, 24), m.dark, tx, 1.2, tz + o * 0.7); }
+      this.d(new THREE.CylinderGeometry(0.16, 0.16, 0.3, 10), m.dark, tx, 2.42, tz);
+      this.dpipe(V(tx - 1.0 * qx, 0.12, tz + 2.3 * qz), V(18.1 * qx, 0.12, 14 * qz), 0.07, m.trim);
+      // Snow settled on the tank and the crates' lee side.
+      this.d(new THREE.SphereGeometry(1, 12, 6, 0, Math.PI * 2, 0, Math.PI / 2).scale(0.75, 0.22, 2.1), m.snow, tx, 2.22, tz, { cast: false });
+    }
+    // Shallow drifts banked against the perimeter wall.
+    for (const [ax, sgn] of [[0, -1], [0, 1], [1, -1], [1, 1]] as const) for (let i = 0; i < 7; i++) {
+      let c = (r() - 0.5) * 54;
+      if (Math.abs(c) < 5.5) c += c < 0 ? -6 : 6;
+      const len = 2.5 + r() * 3, h = 0.35 + r() * 0.5, geo = new THREE.SphereGeometry(1, 12, 6, 0, Math.PI * 2, 0, Math.PI / 2);
+      if (ax === 0) this.d(geo.scale(len, h, 0.7), m.snow, c, 0, (A - 0.1) * sgn, { cast: false });
+      else this.d(geo.scale(0.7, h, len), m.snow, (A - 0.1) * sgn, 0, c, { cast: false });
+    }
+    this.stains(r, [[24, 6], [15, 12.5]], 10);
   }
 
   update(t: number, dt = 0, cam?: THREE.Vector3) {

@@ -46,6 +46,8 @@ export class Player {
   /** Seconds since the last hit taken. */
   sinceHit = 99;
   shake = 0;
+  /** Visual roll from weapon recoil; never changes where you aim. */
+  punch = 0;
   /** 0..1 horizontal speed relative to walking, for spread and bob. */
   moveAmt = 0;
   bobPhase = 0;
@@ -64,7 +66,7 @@ export class Player {
     this.pos.set(0, 0, 9); this.vel.set(0, 0, 0);
     this.yaw = Math.PI; this.pitch = 0; this.recoilPitch = this.recoilYaw = 0;
     this.maxHealth = 100; this.health = 100; this.armor = 0; this.maxArmor = 100;
-    this.speedMult = 1; this.regen = 0; this.sinceHit = 99; this.shake = 0;
+    this.speedMult = 1; this.regen = 0; this.sinceHit = 99; this.shake = 0; this.punch = 0;
     this.crouching = false; this.height = STAND; this.crouchT = 0; this.landDip = 0;
     this.sliding = false; this.slideCd = 0;
     this.invuln = 0; this.airJumps = this.airLeft = 0; this.slideStarted = false;
@@ -95,7 +97,7 @@ export class Player {
     this.pitch = Math.max(-1.54, Math.min(1.54, this.pitch));
     // Recoil settles slowly while the trigger is held, so sustained fire climbs and must
     // be pulled down, then snaps back once you let go.
-    const rec = Math.exp(-(wantsFire ? 4.5 : 11) * dt);
+    const rec = Math.exp(-(wantsFire ? 3.2 : 11) * dt);
     this.recoilPitch *= rec; this.recoilYaw *= rec;
 
     // Slide: crouch while sprinting. Carries momentum, keeps a low profile, and can be
@@ -216,6 +218,7 @@ export class Player {
     }
     this.landDip *= Math.exp(-9 * dt);
     this.shake *= Math.exp(-5 * dt);
+    this.punch *= Math.exp(-13 * dt);
     this.roll += ((this.sliding ? 0.07 : -r * 0.012 * (this.grounded ? 1 : 0.3)) - this.roll) * Math.min(1, dt * 8);
     this.sinceHit += dt;
     if (this.sinceHit > 5 && this.health > 0) {
@@ -235,6 +238,6 @@ export class Player {
     cam.rotation.order = 'YXZ';
     cam.rotation.y = this.yaw + this.recoilYaw + (Math.random() - 0.5) * sh;
     cam.rotation.x = Math.max(-1.56, Math.min(1.56, this.pitch + this.recoilPitch + (Math.random() - 0.5) * sh));
-    cam.rotation.z = this.roll + (Math.random() - 0.5) * sh;
+    cam.rotation.z = this.roll + this.punch + (Math.random() - 0.5) * sh;
   }
 }

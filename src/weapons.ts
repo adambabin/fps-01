@@ -26,33 +26,33 @@ export interface WeaponDef {
 export const WEAPONS: WeaponDef[] = [
   {
     name: 'P-9 Sidearm', slot: 'Sidearm', sound: 'pistol', auto: false, damage: 27, pellets: 1, rpm: 380, mag: 12, reserve: Infinity, reload: 1.25,
-    hip: 0.014, ads: 0.002, bloom: 0.012, kickP: 0.024, kickY: 0.007, zoom: 1.2, adsTime: 0.14, falloff: [18, 40, 0.6],
+    hip: 0.014, ads: 0.002, bloom: 0.012, kickP: 0.0384, kickY: 0.0098, zoom: 1.2, adsTime: 0.14, falloff: [18, 40, 0.6],
     crit: 2, pierce: false, hipPos: [0.12, -0.115, -0.44], adsZ: -0.5, tracer: [3, 2.2, 1.2],
   },
   {
     name: 'AR-7 Vector', slot: 'Rifle', sound: 'rifle', auto: true, damage: 21, pellets: 1, rpm: 680, mag: 30, reserve: 180, reload: 1.9,
-    hip: 0.022, ads: 0.0035, bloom: 0.006, kickP: 0.0085, kickY: 0.0045, zoom: 1.35, adsTime: 0.2, falloff: [28, 60, 0.65],
+    hip: 0.022, ads: 0.0035, bloom: 0.006, kickP: 0.0136, kickY: 0.0063, zoom: 1.35, adsTime: 0.2, falloff: [28, 60, 0.65],
     crit: 1.8, pierce: false, hipPos: [0.135, -0.155, -0.4], adsZ: -0.33, tracer: [3, 2.2, 1.2],
   },
   {
     name: 'SG-12 Breacher', slot: 'Shotgun', sound: 'shotgun', auto: false, damage: 14, pellets: 10, rpm: 84, mag: 6, reserve: 36, reload: 2.3,
-    hip: 0.062, ads: 0.045, bloom: 0, kickP: 0.07, kickY: 0.015, zoom: 1.15, adsTime: 0.22, falloff: [8, 24, 0.25],
+    hip: 0.062, ads: 0.045, bloom: 0, kickP: 0.112, kickY: 0.021, zoom: 1.15, adsTime: 0.22, falloff: [8, 24, 0.25],
     crit: 1.4, pierce: false, unlockWave: 1, pitch: 'Unlock the pump shotgun. Ten pellets a shell; devastating up close.', hipPos: [0.135, -0.135, -0.38], adsZ: -0.3, tracer: [2.5, 1.8, 1],
   },
   {
     name: 'RX Lancer', slot: 'Railgun', sound: 'rail', auto: false, damage: 190, pellets: 1, rpm: 46, mag: 4, reserve: 20, reload: 2.6,
-    hip: 0.03, ads: 0, bloom: 0, kickP: 0.09, kickY: 0.01, zoom: 2.6, adsTime: 0.28, falloff: [200, 300, 1],
+    hip: 0.03, ads: 0, bloom: 0, kickP: 0.144, kickY: 0.014, zoom: 2.6, adsTime: 0.28, falloff: [200, 300, 1],
     crit: 2.2, pierce: true, unlockWave: 4, pitch: 'Unlock the railgun. Huge damage that punches through every robot in line.', hipPos: [0.14, -0.165, -0.4], adsZ: -0.3, tracer: [0.6, 3, 5],
   },
   {
     name: 'VX-9 Hornet', slot: 'SMG', sound: 'smg', auto: true, damage: 14, pellets: 1, rpm: 960, mag: 40, reserve: 240, reload: 1.55,
-    hip: 0.015, ads: 0.006, bloom: 0.0035, kickP: 0.0055, kickY: 0.005, zoom: 1.2, adsTime: 0.13, falloff: [12, 30, 0.5],
+    hip: 0.015, ads: 0.006, bloom: 0.0035, kickP: 0.0088, kickY: 0.007, zoom: 1.2, adsTime: 0.13, falloff: [12, 30, 0.5],
     crit: 1.6, pierce: false, unlockWave: 2, pitch: 'Unlock the submachine gun. Very fast and accurate from the hip, weak at range.',
     hipPos: [0.13, -0.14, -0.38], adsZ: -0.3, tracer: [3, 2.4, 1.4],
   },
   {
     name: 'GL-6 Thumper', slot: 'Launcher', sound: 'launcher', auto: false, damage: 170, pellets: 1, rpm: 72, mag: 6, reserve: 18, reload: 2.9,
-    hip: 0.01, ads: 0.003, bloom: 0, kickP: 0.06, kickY: 0.012, zoom: 1.25, adsTime: 0.24, falloff: [200, 300, 1],
+    hip: 0.01, ads: 0.003, bloom: 0, kickP: 0.096, kickY: 0.0168, zoom: 1.25, adsTime: 0.24, falloff: [200, 300, 1],
     crit: 1, pierce: false, launch: 40, unlockWave: 3, pitch: 'Unlock the grenade launcher. Arcing shells that burst on impact and clear groups.',
     hipPos: [0.15, -0.16, -0.45], adsZ: -0.3, tracer: [3, 1.8, 0.5],
   },
@@ -227,6 +227,8 @@ export class WeaponSystem {
   private pending = -1;
   private kick = 0;
   private kickRot = 0;
+  /** Random sideways roll of the gun per shot. */
+  private kickRoll = 0;
   private swayX = 0;
   private swayY = 0;
   private sprintT = 0;
@@ -498,7 +500,11 @@ export class WeaponSystem {
     player.recoilYaw += (Math.random() - 0.5) * 2 * def.kickY * k;
     this.heat = Math.min(def.hip * 1.6 + 0.02, this.heat + def.bloom);
     this.kick = Math.min(1.6, this.kick + (def.pellets > 1 || def.pierce ? 1.3 : def.auto ? 0.55 : 0.9));
-    this.kickRot += def.kickP * 3;
+    this.kickRot += Math.min(0.32, def.kickP * 4);
+    const rollDir = Math.random() < 0.5 ? -1 : 1;
+    this.kickRoll += rollDir * (0.02 + def.kickY * 2.5);
+    // Visual-only screen jolt: a roll around the view axis, so aim is unaffected.
+    player.punch += rollDir * Math.min(0.035, 0.004 + def.kickP * 0.3) * k;
     const gun = this.guns[this.current];
     if (gun.pump) this.pumpT = 0.52;
     this.flash.position.copy(gun.muzzle).add(gun.group.position).setZ(gun.group.position.z + gun.muzzle.z - 0.03);
@@ -519,6 +525,7 @@ export class WeaponSystem {
     const e = a * a * (3 - 2 * a);
     this.kick *= Math.exp(-14 * dt);
     this.kickRot *= Math.exp(-12 * dt);
+    this.kickRoll *= Math.exp(-11 * dt);
     this.swayX += (Math.max(-40, Math.min(40, input.dx)) * -0.00035 - this.swayX) * Math.min(1, dt * 9);
     this.swayY += (Math.max(-40, Math.min(40, input.dy)) * 0.00035 - this.swayY) * Math.min(1, dt * 9);
 
@@ -550,9 +557,10 @@ export class WeaponSystem {
       y -= (1 - p) * 0.3; rx -= (1 - p) * 0.6;
     }
 
-    const kz = this.kick * 0.028 * (1 - e * 0.45);
-    g.position.set(x + bx_ + this.swayX, y + by + idle + this.swayY - player.vel.y * 0.0015 * (1 - e), z + kz);
-    g.rotation.set(rx + this.kickRot * (1 - e * 0.6) + this.swayY * 2, ry + this.swayX * 3, rz + this.swayX * -4 * (1 - e));
+    // Recoil: the gun punches back and up into the shoulder, with a little random roll.
+    const kz = this.kick * 0.045 * (1 - e * 0.45), ky = this.kick * 0.012 * (1 - e * 0.6);
+    g.position.set(x + bx_ + this.swayX, y + by + idle + this.swayY + ky - player.vel.y * 0.0015 * (1 - e), z + kz);
+    g.rotation.set(rx + this.kickRot * (1 - e * 0.6) + this.swayY * 2, ry + this.swayX * 3, rz + this.kickRoll * (1 - e * 0.7) + this.swayX * -4 * (1 - e));
 
     // Moving parts: pistol slide, shotgun pump, magazines, railgun charge glow.
     const st = this.state;

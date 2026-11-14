@@ -9,7 +9,9 @@ const K = 4;
 /** Height a ground robot steps up or down without it counting as a drop. */
 export const ROBOT_STEP = 0.55;
 /** A robot needs this band above a surface free of boxes (within PAD of the cell centre) to stand there. */
-const BODY_LO = 0.5, BODY_HI = 1.5, PAD = 0.55;
+// (BODY_HI is a little above the 1.6 m that Enemy.update pushes robots out of, so a route never
+// squeezes under something the robot's collision would catch on.)
+const BODY_LO = 0.5, BODY_HI = 1.65, PAD = 0.55;
 /** A cell only counts as walkable if the surface extends this far around its centre, which keeps routes off the very edge of decks and stairs. */
 const EDGE = 0.25;
 const NONE = 255;
@@ -61,7 +63,7 @@ export class FlowField {
     for (let c = 0; c < N; c++) {
       const cx = (c % SIZE) - HALF + 0.5, cz = ((c / SIZE) | 0) - HALF + 0.5;
       tops.length = 0;
-      for (const b of near[c]) if (cx > b.min.x && cx < b.max.x && cz > b.min.z && cz < b.max.z && b.max.y > -0.05 && b.max.y < 12) tops.push(b.max.y);
+      for (const b of near[c]) if (cx > b.min.x && cx < b.max.x && cz > b.min.z && cz < b.max.z && b.max.y > -0.05 && b.max.y < world.ceil + 3) tops.push(b.max.y);
       tops.sort((a, b) => a - b);
       for (let i = 0; i < tops.length && count[c] < K; i++) {
         const t = tops[i];
@@ -98,7 +100,13 @@ export class FlowField {
             const bridged = (b: Box) => b.max.y >= lo && b.max.y <= hi && mx >= b.min.x - 0.01 && mx <= b.max.x + 0.01 && mz >= b.min.z - 0.01 && mz <= b.max.z + 0.01;
             if (!near[c].some(bridged) && !near[n].some(bridged)) best = NONE;
           }
-          if (best === NONE && below !== NONE && !obstructed(n, y)) best = below;
+          if (best === NONE && below !== NONE && !obstructed(n, y)) {
+            // A drop must be open air all the way down: no floor slab or tread between the
+            // robot's level and the surface it would land on.
+            const land = h[n * K + below], nx = ni - HALF + 0.5, nz = nj - HALF + 0.5;
+            const blocked = near[n].some((b) => b.max.y > land + 0.05 && b.min.y < y + BODY_LO && nx > b.min.x && nx < b.max.x && nz > b.min.z && nz < b.max.z);
+            if (!blocked) best = below;
+          }
           link[(c * K + k) * 4 + d] = best;
         }
       }

@@ -76,7 +76,12 @@ export class Enemy {
   private spin: THREE.Object3D[] = [];
   private smokeT = 0;
   private walk = Math.random() * 6;
-  private los = false;
+  /** Height of a ground robot's feet above whatever is under it, from the last update. */
+  private air = 0;
+  /** Whether this robot can currently see the player (refreshed a few times a second). */
+  los = false;
+  /** Seconds a flying robot has gone without sight of the player; kept by `Game.catchUp` on big maps. */
+  lost = 0;
   private losT = Math.random() * 0.25;
   private attackCd = 1 + Math.random() * 1.5;
   private windup = 0;
@@ -225,8 +230,9 @@ export class Enemy {
     } else if (boss) {
       // Warden: slow orbit above the cover, cycling barrage, rocket salvo and ground pulse.
       this.orbit += dt * 0.22 * this.strafe;
-      const reach = c.world.half - 9;
-      v1.set(Math.max(-reach, Math.min(reach, p.pos.x + Math.cos(this.orbit) * 14)), 5.3 + Math.sin(this.age * 0.8) * 0.5, Math.max(-reach, Math.min(reach, p.pos.z + Math.sin(this.orbit) * 14))).sub(this.pos);
+      // In a tall arena the boss holds station a little above whatever floor the player is on.
+      const reach = c.world.half - 9, by = c.world.ceil > CEIL ? Math.min(c.world.ceil - 3, p.pos.y + 5.3) : 5.3;
+      v1.set(Math.max(-reach, Math.min(reach, p.pos.x + Math.cos(this.orbit) * 14)), by + Math.sin(this.age * 0.8) * 0.5, Math.max(-reach, Math.min(reach, p.pos.z + Math.sin(this.orbit) * 14))).sub(this.pos);
       const l = v1.length() || 1, k = Math.min(1, l / 4);
       wx = (v1.x / l) * k; wy = (v1.y / l) * k; wz = (v1.z / l) * k;
       facePlayer = true;
@@ -258,7 +264,8 @@ export class Enemy {
     } else {
       // Drone: circle the player at range and altitude.
       this.orbit += dt * 0.55 * this.strafe;
-      const r = 8.5, ty = Math.min(CEIL - 1.5, p.pos.y + 3.4 + Math.sin(this.age * 1.3) * 0.7);
+      // Indoors, stay under the ceiling over the player rather than pressing up through it.
+      const r = 8.5, ty = Math.min(c.world.ceil - 1.5, p.pos.y + 3.4 + Math.sin(this.age * 1.3) * 0.7, c.world.ceilingAt(p.pos.x, p.pos.z, p.pos.y + 1) - 1);
       v1.set(p.pos.x + Math.cos(this.orbit) * r, ty, p.pos.z + Math.sin(this.orbit) * r).sub(this.pos);
       const l = v1.length() || 1;
       const k = Math.min(1, l / 3);
@@ -277,18 +284,21 @@ export class Enemy {
     }
 
     // Integrate
-    const acc = Math.min(1, dt * (fly ? 2.5 : 7));
+    // A ground robot that has stepped off a ledge keeps its momentum until it lands, so it
+    // cannot turn back onto the ledge it just left.
+    const acc = !fly && this.air > 0.25 ? 0 : Math.min(1, dt * (fly ? 2.5 : 7));
     this.vel.x += (wx * speed - this.vel.x) * acc;
     this.vel.z += (wz * speed - this.vel.z) * acc;
     if (fly) this.vel.y += (wy * speed - this.vel.y) * acc;
     const feet = this.pos.y;
     this.pos.addScaledVector(this.vel, dt);
     if (fly) {
-      this.pos.y = Math.max(boss ? 4.4 : 1.4, Math.min(CEIL - (boss ? 2.5 : 1), this.pos.y));
+      this.pos.y = Math.max(boss ? 4.4 : 1.4, Math.min(c.world.ceil - (boss ? 2.5 : 1), this.pos.y));
       c.world.pushOutSphere(this.pos, def.radius + 0.1);
     } else {
       // Feet follow whatever is underneath: step up treads and low ledges, fall off edges.
       const ground = c.world.groundAt(this.pos.x, this.pos.z, feet + ROBOT_STEP);
+      this.air = this.pos.y - ground;
       if (this.pos.y > ground + 0.02) this.vel.y -= 22 * dt;
       else { this.vel.y = 0; this.pos.y = feet + (ground - feet) * Math.min(1, dt * 16); }
       c.world.pushOutXZ(this.pos, def.radius, this.pos.y + ROBOT_STEP + 0.05, this.pos.y + Math.min(def.height, 1.6));

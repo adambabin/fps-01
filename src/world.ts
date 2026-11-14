@@ -8,12 +8,12 @@ import { makeHazardTexture, makeMacroTexture, makeRadialTexture, makeSignTexture
 export const ARENA = 30;
 export const CEIL = 9;
 
-export type ArenaId = 'reactor' | 'foundry' | 'vault' | 'yard' | 'frost' | 'city' | 'beach';
+export type ArenaId = 'reactor' | 'foundry' | 'vault' | 'yard' | 'frost' | 'city' | 'beach' | 'skyrise';
 /** Order used when the arena changes after each boss. */
-export const ARENA_ORDER: ArenaId[] = ['reactor', 'foundry', 'vault', 'yard', 'frost', 'city', 'beach'];
+export const ARENA_ORDER: ArenaId[] = ['reactor', 'foundry', 'vault', 'yard', 'frost', 'city', 'beach', 'skyrise'];
 /** Half the side of a big free-roam map, against ARENA (30) for the others. */
 export const BIG = 90;
-const BIG_ARENAS: ArenaId[] = ['city', 'beach'];
+const BIG_ARENAS: ArenaId[] = ['city', 'beach', 'skyrise'];
 export const ARENAS: Record<ArenaId, { name: string; blurb: string }> = {
   reactor: { name: 'Reactor Hall', blurb: 'Open floor around the core, with a raised gallery in each corner. Long sightlines.' },
   foundry: { name: 'Foundry', blurb: 'Furnaces and conveyor lines around a molten crucible, with a bridge across the top.' },
@@ -21,6 +21,7 @@ export const ARENAS: Record<ArenaId, { name: string; blurb: string }> = {
   yard: { name: 'Rain Yard', blurb: 'Outdoors at night in the rain. Three levels: container lanes, catwalks, and bridges across the stacks.' },
   frost: { name: 'Frost Outpost', blurb: 'Outdoors in falling snow. Hut roofs joined by bridges, and a lookout up the radio mast.' },
   city: { name: 'City', blurb: 'Big map, free to roam: a plaza, a market street, a construction site, a car park and tenement alleys.' },
+  skyrise: { name: 'Skyrise', blurb: 'Big map, free to roam: a four-floor tower with lifts, a roof garden, a helipad, sky-bridges and a monorail stop.' },
   beach: { name: 'Beach Invasion', blurb: 'Big map, free to roam: surf and landing craft, a pier, lighthouse point, bunkers, a gun battery and a village.' },
 };
 
@@ -37,6 +38,8 @@ interface Theme {
   outdoor?: boolean; sky?: number; weather?: 'rain' | 'snow'; floorRough?: number; env?: number;
   /** Tint of the soft ground material (snow by default; sand on the beach). */
   ground?: number;
+  /** How high flying robots go (default CEIL). Tall maps raise it; the lid sits 5.5 m above. */
+  ceil?: number;
   /** Reflections come from a room built out of this theme's own lamp colours instead of the neutral studio. */
   ownEnv?: boolean; grade?: Grade;
   /** Tint of the drifting dust motes indoors. */
@@ -89,6 +92,15 @@ const THEMES: Record<ArenaId, Theme> = {
     corners: [0xfff2e0, 0xe6f0ff], cornerI: 30, coreLight: 0xfff2d8, coreI: 20, coreY: 6,
     outdoor: true, sky: 0x9aa4ab, floorRough: 0.9, env: 0.45, skyTop: 0x5d6c7c, skyHorizon: 0xcfc8b6, ground: 0xb7a274,
     grade: { shadows: [0.92, 0.98, 1.06], highlights: [1.04, 1.0, 0.95], saturation: 0.9, contrast: 1.06, vignette: 0.22 },
+  },
+  skyrise: {
+    // Night among lit towers: cool sky light, cyan and magenta signage.
+    floor: 0x9aa3b2, wall: 0x8e98a8, trim: 0xaab2bd, dark: 0x2f3440,
+    stripA: [0.5, 1.9, 2.6], stripB: [2.6, 0.6, 1.9], core: [0.6, 2.2, 3.0], panel: [1.7, 1.9, 2.3],
+    fog: 0x0c1020, fogDensity: 0.006, hemiSky: 0x8ea2d8, hemiGround: 0x33364a, hemi: 1.15, sun: 0xaebcff, sunI: 1.2,
+    corners: [0x9fd0ff, 0xff9fe0], cornerI: 160, coreLight: 0x9fdcff, coreI: 100, coreY: 6,
+    outdoor: true, sky: 0x0c1020, env: 0.7, skyTop: 0x05060e, skyHorizon: 0x2a2f5a, ceil: 20,
+    grade: { shadows: [0.88, 0.95, 1.12], highlights: [1.0, 1.0, 1.06], saturation: 1.08, contrast: 1.07, vignette: 0.26 },
   },
   city: {
     // Dusk: a low warm sun, cool sky light and lit windows.
@@ -333,6 +345,7 @@ export class World {
     this.collision.boxes.length = 0;
     this.gates = []; this.vents = [];
     this.half = this.collision.half = BIG_ARENAS.includes(id) ? BIG : ARENA;
+    this.collision.ceil = THEMES[id].ceil ?? CEIL;
     this.sun.position.set(14, 34, 9); this.sun.target.position.set(0, 0, 0); this.sun.target.updateMatrixWorld();
 
     const t = this.theme = THEMES[id], m = this.m;
@@ -359,9 +372,9 @@ export class World {
     this.corners.forEach((l, i) => { l.color.setHex(t.corners[i === 0 || i === 3 ? 0 : 1]); l.intensity = t.cornerI; });
     this.coreLight.color.setHex(t.coreLight); this.coreLight.position.set(0, t.coreY, 0);
 
-    this.late = true; if (id === 'beach') this.shellBeach(); else if (this.big) this.shellBig(); else this.shell(); this.late = false;
+    this.late = true; if (id === 'beach') this.shellBeach(); else if (this.big) this.shellBig(id === 'skyrise' ? this.m.floor : undefined); else this.shell(); this.late = false;
     if (id === 'reactor') this.buildReactor(); else if (id === 'foundry') this.buildFoundry(); else if (id === 'vault') this.buildVault();
-    else if (id === 'yard') this.buildYard(); else if (id === 'city') this.buildCity(); else if (id === 'beach') this.buildBeach(); else this.buildFrost();
+    else if (id === 'yard') this.buildYard(); else if (id === 'city') this.buildCity(); else if (id === 'beach') this.buildBeach(); else if (id === 'skyrise') this.buildSkyrise(); else this.buildFrost();
     this.flush();
   }
 
@@ -1126,10 +1139,10 @@ export class World {
   // ---------- City (big map) ----------
 
   /** Ground, an invisible lid and a wall of tall buildings round the edge of a big outdoor map. */
-  private shellBig() {
+  private shellBig(ground: THREE.Material = this.m.asphalt) {
     const H = this.half, m = this.m, edge = H - 14;
-    this.box(0, -0.5, 0, H * 2, 1, H * 2, m.asphalt, { cast: false, tex: 4 });
-    this.collision.add(0, 14.5, 0, H * 2 + 2, 1, H * 2 + 2);
+    this.box(0, -0.5, 0, H * 2, 1, H * 2, ground, { cast: false, tex: 4 });
+    this.collision.add(0, this.collision.ceil + 5.5, 0, H * 2 + 2, 1, H * 2 + 2);
     const r = this.rng(101), mats = [m.wall, m.contA, m.pillar, m.contB];
     for (const [ax, sgn] of [[0, 1], [0, -1], [1, 1], [1, -1]] as const) {
       // Six buildings a side fill the strip between the ring road and the map edge.
@@ -1430,6 +1443,134 @@ export class World {
     // Pads inland, used when the player is too far from the landing craft.
     for (const s of [1, -1]) { pad(62 * s, 12); pad(22 * s, -6); pad(58 * s, -30); pad(30 * s, -64); pad(68 * s, -68); }
     pad(0, 38); pad(0, -44);
+  }
+
+  // ---------- Skyrise (big map) ----------
+
+  /**
+   * Skyrise: a tower campus at night, 180 m square, free to roam, and the tallest map.
+   *   plaza            ground level all round, with a fountain and planters
+   *   the tower        four floors (lobby, offices, a floor under construction, the roof) joined by
+   *                    stairs inside; robots also arrive by lift on every floor
+   *   east annex       a roof garden at 4 m, reached by outside stairs or a sky-bridge from the offices
+   *   west block       a helipad at 8 m, reached by a stair tower or a sky-bridge from the third floor
+   *   monorail stop    a raised platform along the south side
+   */
+  private buildSkyrise() {
+    const m = this.m, r = this.rng(401), V = (x: number, y: number, z: number) => new THREE.Vector3(x, y, z), H = this.half;
+    this.sky(300);
+    const B = (x0: number, x1: number, z0: number, z1: number, y0: number, y1: number, mat: THREE.Material, o: BoxOpts = {}) =>
+      this.box((x0 + x1) / 2, (y0 + y1) / 2, (z0 + z1) / 2, x1 - x0, y1 - y0, z1 - z0, mat, o);
+    const crate = (x: number, z: number, s: number, y0 = 0, mat: THREE.Material = m.crate) => B(x - s / 2, x + s / 2, z - s / 2, z + s / 2, y0, y0 + s, mat, { tex: s });
+    /** Waist-high cover on any floor. */
+    const cover = (x: number, z: number, sx: number, sz: number, y0 = 0) => B(x - sx / 2, x + sx / 2, z - sz / 2, z + sz / 2, y0, y0 + 1.2, m.trim, { tex: 2 });
+    const post = (x: number, z: number, top: number) => B(x - 0.2, x + 0.2, z - 0.2, z + 0.2, 0, top - 0.2, m.dark, { tex: 1 });
+    const pad = (x: number, z: number) => {
+      this.gates.push({ pos: V(x, 0, z), dir: V(-x, 0, 9 - z).normalize() });
+      this.d(new THREE.RingGeometry(1.5, 1.9, 24), m.hazard, x, 0.02, z, { rx: -Math.PI / 2, cast: false });
+      this.lamp(x, 0.03, z, 0.5, 0.04, 0.5, m.red);
+    };
+
+    // --- Spawn points: doors in the boundary buildings and pads on the plaza ---
+    const edge = H - 14;
+    for (const [ax, sgn] of [[0, 1], [0, -1], [1, 1], [1, -1]] as const) for (const c of [-36, 0, 36]) {
+      const x = ax ? (edge - 3) * sgn : c, z = ax ? c : (edge - 3) * sgn;
+      this.gates.push({ pos: V(x, 0, z), dir: V(ax ? -sgn : 0, 0, ax ? 0 : -sgn) });
+      this.dbox(ax ? (edge - 0.06) * sgn : c, 1.9, ax ? c : (edge - 0.06) * sgn, ax ? 0.1 : 5.4, 3.8, ax ? 5.4 : 0.1, m.dark, false);
+      this.lamp(ax ? (edge - 0.2) * sgn : c, 3.95, ax ? c : (edge - 0.2) * sgn, ax ? 0.1 : 4.8, 0.12, ax ? 4.8 : 0.1, m.red);
+    }
+    for (const s of [1, -1]) { pad(42 * s, 22); pad(62 * s, -62); pad(30 * s, 62); }
+    pad(0, 64); pad(0, -66);
+
+    // --- The tower: x -20..20, z -50..-10, floors at 0, 4, 8 and the roof at 12 ---
+    const X0 = -20, X1 = 20, Z0 = -50, Z1 = -10;
+    for (const y of [4, 8, 12]) {
+      // Each slab leaves a slot for the stairs coming up from below, on alternate sides of the building.
+      if (y === 8) { B(X0, X1, Z0, -14, y - 0.3, y, m.pillar, { tex: 4 }); B(X0, -5.1, -14, Z1, y - 0.3, y, m.pillar, { tex: 4 }); B(6, X1, -14, Z1, y - 0.3, y, m.pillar, { tex: 4 }); }
+      else { B(X0, X1, -46, Z1, y - 0.3, y, m.pillar, { tex: 4 }); B(X0, -6, Z0, -46, y - 0.3, y, m.pillar, { tex: 4 }); B(5.1, X1, Z0, -46, y - 0.3, y, m.pillar, { tex: 4 }); }
+      // Ceiling lights for the floor below.
+      for (const x of [-12, 0, 12]) for (const z of [-40, -30, -20]) this.lamp(x, y - 0.33, z, 5, 0.05, 0.3, m.panel);
+    }
+    this.flight(-4.9, -47.5, 'x', 1, 10, 3, 0, 4);
+    this.flight(4.9, -12.5, 'x', -1, 10, 3, 4, 8);
+    this.flight(-4.9, -47.5, 'x', 1, 10, 3, 8, 12);
+    // Back wall the full height; side walls on the ground floor with a wide opening each.
+    B(X0, X1, Z0 - 0.3, Z0, 0, 13.1, m.wall, { tex: 6 });
+    for (const s of [1, -1]) { const x = s > 0 ? X1 : X0 - 0.3; B(x, x + 0.3, Z0, -22, 0, 3.7, m.wall, { tex: 4 }); B(x, x + 0.3, -16, Z1, 0, 3.7, m.wall, { tex: 4 }); }
+    // Waist-high edges on the upper floors, open where the sky-bridges arrive (east on 4, west on 8).
+    for (const y of [4, 8, 12]) {
+      B(X0, X1, Z1 - 0.3, Z1, y, y + 1.1, m.trim, { tex: 2 });
+      for (const s of [1, -1]) {
+        const x = s > 0 ? X1 - 0.3 : X0, gap = (y === 4 && s > 0) || (y === 8 && s < 0);
+        if (gap) { B(x, x + 0.3, Z0, -21.7, y, y + 1.1, m.trim, { tex: 2 }); B(x, x + 0.3, -17.3, Z1, y, y + 1.1, m.trim, { tex: 2 }); }
+        else B(x, x + 0.3, Z0, Z1, y, y + 1.1, m.trim, { tex: 2 });
+      }
+    }
+    for (const sx of [1, -1]) {
+      for (const [z0, z1] of [[Z0, Z0 + 2], [Z1 - 2, Z1]]) B(sx > 0 ? X1 - 2 : X0, sx > 0 ? X1 : X0 + 2, z0, z1, 0, 13.1, m.dark, { tex: 2 });
+      for (const z of [-22, -38]) B(10 * sx - 0.5, 10 * sx + 0.5, z - 0.5, z + 0.5, 0, 12, m.dark, { tex: 1 });
+    }
+    // Lift core: robots step out of it on every floor.
+    B(12, 18, -34, -26, 0, 14.4, m.dark, { tex: 3 });
+    for (const y of [0, 4, 8, 12]) {
+      this.gates.push({ pos: V(10.5, y, -30), dir: V(-1, 0, 0) });
+      this.lamp(11.96, y + 1.3, -30, 0.04, 2.4, 2.2, m.stripA); this.lamp(11.94, y + 2.75, -30, 0.04, 0.2, 2.6, m.red);
+    }
+    // Lobby.
+    cover(0, -30, 8, 1.2); cover(-12, -16, 1.2, 5); crate(8, -42, 1.4); crate(-14, -42, 1.2, 0, m.crate2);
+    // Offices: rows of desks.
+    for (const x of [-13, -4, 5]) for (const z of [-40, -32, -24]) cover(x, z, 4, 1.2, 4);
+    crate(14, -44, 1.3, 4); crate(-16, -14, 1.2, 4, m.crate2);
+    // Construction floor: pallets, pipe stacks and a site hut.
+    crate(-12, -40, 1.5, 8); crate(-10.4, -40.6, 1.2, 8, m.crate2); crate(6, -36, 1.5, 8, m.crate2); crate(2, -22, 1.4, 8);
+    B(-17, -11, -30, -27, 8, 8.9, m.trim, { tex: 2 }); B(4, 9, -44, -41.5, 8, 10.4, m.contA, { tex: 2.4 });
+    // Roof: plant, a water tank and the mast.
+    B(-15, -10, -44, -40, 12, 13.7, m.trim, { tex: 2 }); B(-15, -10, -22, -18, 12, 13.7, m.trim, { tex: 2 }); B(2, 8, -24, -18, 12, 14.4, m.contB, { tex: 3 });
+    crate(-2, -30, 1.4, 12); crate(6, -40, 1.2, 12, m.crate2);
+    this.dbox(15, 21, -30, 0.5, 13, 0.5, m.dark); this.lamp(15, 27.6, -30, 0.5, 0.5, 0.5, m.red);
+
+    // --- East annex: roof garden at 4 m ---
+    B(40, 70, -40, -9.9, 0, 4, m.wall, { tex: 5 });
+    this.windows(40, 70, -40, -9.9, 4.6, r, 'x+z-z+');
+    this.deck(30, -19.5, 20, 3, 4);
+    this.flight(55, 0.1, 'z', -1, 10, 3, 0, 4, { solid: true });
+    for (const [x, z, sx, sz] of [[48, -30, 8, 1.4], [62, -22, 1.4, 8], [50, -16, 1.4, 5], [60, -34, 6, 1.4]]) cover(x, z, sx, sz, 4);
+    for (const x of [44, 52]) for (const z of [-38, -32]) B(x - 0.15, x + 0.15, z - 0.15, z + 0.15, 4, 6.6, m.dark, { tex: 1 });
+    this.dbox(48, 6.7, -35, 9, 0.2, 7, m.dark);
+
+    // --- West block: helipad at 8 m ---
+    B(-70, -40, -40, -10, 0, 8, m.wall, { tex: 5 });
+    this.windows(-70, -40, -40, -10, 8.4, r, 'x-z-z+');
+    this.deck(-30, -19.5, 20, 3, 8);
+    this.d(new THREE.RingGeometry(6, 6.6, 40), m.hazard, -55, 8.02, -25, { rx: -Math.PI / 2, cast: false });
+    this.lamp(-55, 8.03, -25, 0.5, 0.04, 4.4, m.stripA); this.lamp(-56.6, 8.03, -25, 0.5, 0.04, 4.4, m.stripA); this.lamp(-53.4, 8.03, -25, 0.5, 0.04, 4.4, m.stripA); this.lamp(-55, 8.03, -25, 3.2, 0.04, 0.5, m.stripA);
+    crate(-66, -14, 1.4, 8); crate(-44, -36, 1.3, 8, m.crate2); cover(-58, -37, 8, 1.2, 8);
+    // Stair tower up the south face: two flights with a landing between.
+    this.flight(-69.9, -7, 'x', 1, 10, 3, 0, 4); this.deck(-58.4, -7, 3, 3, 4);
+    this.flight(-56.9, -7, 'x', 1, 10, 3, 4, 8); this.deck(-45.4, -7.75, 3, 4.5, 8);
+    post(-59.6, -5.8, 4); post(-57.2, -8.2, 4); post(-46.6, -5.8, 8); post(-44.2, -5.8, 8);
+
+    // --- South: monorail stop ---
+    B(-30.1, 30.1, 40, 46, 3.8, 4, m.pillar, { tex: 4 });
+    this.flight(-40.1, 43, 'x', 1, 10, 3, 0, 4, { solid: true }); this.flight(40.1, 43, 'x', -1, 10, 3, 0, 4, { ramp: true });
+    for (const x of [-20, 0, 20]) { post(x, 41, 4); post(x, 45, 4); }
+    for (const x of [-18, 0, 18]) cover(x, 44.6, 5, 0.8, 4);
+    B(-22, 22, 46.6, 49.6, 3.4, 6.8, m.contB, { tex: 3 }); this.lamp(0, 5.4, 46.56, 40, 0.9, 0.04, m.stripA);
+    for (const x of [-16, 16]) B(x - 0.5, x + 0.5, 47.6, 48.6, 0, 3.4, m.dark, { tex: 1 });
+
+    // --- Plaza ---
+    B(-4, 4, 20, 28, 0, 0.6, m.trim, { tex: 2 }); this.dbox(0, 0.62, 24, 6.8, 0.04, 6.8, this.water, false);
+    for (const o of [-3.5, 3.5]) { this.lamp(o, 0.63, 24, 0.08, 0.04, 7, m.stripA); this.lamp(0, 0.63, 24 + o, 7, 0.04, 0.08, m.stripA); }
+    for (const s of [1, -1]) {
+      cover(18 * s, 10, 8, 1.4); cover(30 * s, 28, 1.4, 8); cover(58 * s, 14, 8, 1.4); cover(64 * s, 44, 1.4, 8); cover(22 * s, -64, 10, 1.4); cover(52 * s, -56, 1.4, 8); cover(8 * s, 60, 1.4, 6);
+      B(34 * s - 1.6, 34 * s + 1.6, 8.6, 11.4, 0, 2.8, m.contB, { tex: 2 }); this.lamp(34 * s, 2.2, 11.42, 2.4, 0.5, 0.04, m.stripB);
+      crate(46 * s, 4, 1.5); crate(47.5 * s, 5, 1.1, 0, m.crate2); crate(12 * s, 34, 1.4, 0, m.crate2);
+    }
+    // Street lamps (lit heads only).
+    for (const [x, z] of [[30, 0], [60, 30], [30, 70], [60, -70], [0, -70], [72, 0]]) for (const sx of [1, -1]) {
+      this.dbox(x * sx, 3.2, z, 0.16, 6.4, 0.16, m.dark);
+      this.lamp(x * sx, 6.45, z, 1.1, 0.12, 0.4, m.panel);
+    }
   }
 
   update(t: number, dt = 0, cam?: THREE.Vector3) {

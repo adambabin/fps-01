@@ -181,7 +181,8 @@ export class Enemy {
     let routed = false;
     const follow = () => { if (c.nav.dir(this.pos.x, this.pos.y, this.pos.z, v3)) { wx = v3.x; wz = v3.z; routed = true; } else { wx = tx; wz = tz; } };
     // On the player's level, as opposed to under or over them on another floor.
-    const level = Math.abs(dy) < 1.4;
+    // (Kept tight: a robot facing a 1.2 m dock is not on the player's level and must go round.)
+    const level = Math.abs(dy) < 0.7;
     let facePlayer = this.los;
 
     if (this.type === 'scuttler') {

@@ -68,8 +68,8 @@ export class Objectives {
       o.goal = Math.min(15, 9 + wave * 0.5);
       o.title = 'Secure the uplink'; o.desc = 'Stand in the marked zone';
       o.pos = zone!.clone();
-      this.ring.position.set(zone!.x, 0.06, zone!.z);
-      this.beam.position.set(zone!.x, 3.5, zone!.z);
+      this.ring.position.set(zone!.x, zone!.y + 0.06, zone!.z);
+      this.beam.position.set(zone!.x, zone!.y + 3.5, zone!.z);
       this.ring.visible = this.beam.visible = true;
     } else if (kind === 'prime') {
       o.goal = 30;

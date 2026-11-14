@@ -10,6 +10,8 @@ export class CollisionWorld {
   boxes: Box[] = [];
   /** Half the side of the playable square, set by the arena that is loaded. */
   half = 30;
+  /** Highest that flying robots go, set by the arena. Navigation looks for floors up to 3 m above it. */
+  ceil = 9;
 
   add(cx: number, cy: number, cz: number, sx: number, sy: number, sz: number): Box {
     const b = {
@@ -71,6 +73,15 @@ export class CollisionWorld {
       if (b.max.y > g && b.max.y <= maxY && x > b.min.x && x < b.max.x && z > b.min.z && z < b.max.z) g = b.max.y;
     }
     return g;
+  }
+
+  /** Height of the underside of the lowest thing over the point (x, z) that is above minY, or Infinity for open sky. */
+  ceilingAt(x: number, z: number, minY: number): number {
+    let c = Infinity;
+    for (const b of this.boxes) {
+      if (b.min.y < c && b.min.y >= minY && x > b.min.x && x < b.max.x && z > b.min.z && z < b.max.z) c = b.min.y;
+    }
+    return c;
   }
 
   /** Moves a box (centre c, half extents h) along one axis, resolving penetration. */

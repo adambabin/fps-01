@@ -540,6 +540,9 @@ export class Game {
     if (this.world.big) {
       const near = all.filter((g) => { const d = Math.hypot(g.pos.x - p.x, g.pos.z - p.z); return d > 16 && d < 62; });
       gates = near.length ? near : [...all].sort((a, b) => a.pos.distanceTo(p) - b.pos.distanceTo(p)).slice(0, 3);
+      // Where robots can arrive on the player's own floor (lifts in a tower), do so about half the time.
+      const level = gates.filter((g) => Math.abs(g.pos.y - p.y) < 2 && g.pos.y > 1);
+      if (level.length && Math.random() < 0.5) gates = level;
     }
     if (!gates.length) gates = all;
     return gates[(Math.random() * gates.length) | 0];
@@ -547,16 +550,36 @@ export class Game {
 
   /**
    * Big maps only: a ground robot left far behind when the player moves on is brought back in
-   * at a spawn point near them, so a wave never stalls on stragglers across the map.
+   * at a spawn point near them, so a wave never stalls on stragglers across the map. Flyers that
+   * lose the player are brought back too.
    */
   private catchUp(dt: number) {
     if (!this.world.big || (this.catchUpT -= dt) > 0) return;
     this.catchUpT = 1;
     const p = this.player.pos;
+    const top = this.world.collision.ceil;
     for (const e of this.enemies.list) {
-      if (e.type === 'boss' || Math.hypot(e.pos.x - p.x, e.pos.z - p.z) < 75) continue;
-      if (e.type === 'drone') { const a = Math.random() * Math.PI * 2; e.pos.set(p.x + Math.cos(a) * 26, CEIL - 1, p.z + Math.sin(a) * 26); }
-      else { const g = this.pickGate(); e.pos.copy(g.pos); e.yaw = Math.atan2(g.dir.x, g.dir.z); }
+      const fly = e.type === 'drone' || e.type === 'boss';
+      // Flyers cannot path round floors and walls, so one that has lost sight of the player for a
+      // while (left under a ceiling when they changed floor) is brought back level with them.
+      e.lost = fly && !e.los ? e.lost + 1 : 0;
+      const far = Math.hypot(e.pos.x - p.x, e.pos.z - p.z) > 75;
+      if (fly && (e.lost >= 6 || (far && e.type === 'drone'))) {
+        // Look for a spot near the player with room for the robot and a clear view of them;
+        // indoors that means the same storey, so stay close to the player's height.
+        const boss = e.type === 'boss', size = e.def.radius + 0.3, eye = tmpB.set(p.x, p.y + 1.5, p.z);
+        const roof = this.world.collision.ceilingAt(p.x, p.z, p.y + 1), y = Math.min(top - (boss ? 2.6 : 1), p.y + (boss ? 4.6 : 1.9), roof - size - 0.15);
+        let found = false;
+        for (let i = 0; i < 10 && !found; i++) {
+          const a = Math.random() * Math.PI * 2, r = (boss ? 12 : 7) + Math.random() * 6;
+          tmpA.set(p.x + Math.cos(a) * r, y, p.z + Math.sin(a) * r);
+          found = !this.world.collision.overlaps(tmpA, tmpC.set(size, size, size)) && this.world.collision.clear(tmpA, eye);
+        }
+        if (!found) continue;
+        e.pos.copy(tmpA);
+        e.lost = 0;
+      } else if (!fly && far) { const g = this.pickGate(); e.pos.copy(g.pos); e.yaw = Math.atan2(g.dir.x, g.dir.z); }
+      else continue;
       e.vel.set(0, 0, 0);
     }
   }
@@ -569,7 +592,7 @@ export class Game {
       const def = BOSSES[(n - 1) % BOSSES.length];
       // On a big map the boss arrives near the player, not at the map centre.
       const p = this.player.pos, lim = this.world.collision.half - 12, big = this.world.big;
-      tmpA.set(big ? Math.max(-lim, Math.min(lim, p.x)) : 0, CEIL - 2.6, big ? Math.max(-lim, Math.min(lim, p.z - 16)) : -16);
+      tmpA.set(big ? Math.max(-lim, Math.min(lim, p.x)) : 0, big ? Math.min(this.world.collision.ceil - 2.6, p.y + CEIL - 2.6) : CEIL - 2.6, big ? Math.max(-lim, Math.min(lim, p.z - 16)) : -16);
       this.boss = this.enemies.spawn(type, tmpA, (0.6 + 0.4 * n) * this.diff.hp, dmg);
       this.boss.label = def.name; this.boss.tier = ((n - 1) % BOSSES.length) + 1;
       this.boss.tint(def.tint);
@@ -579,7 +602,7 @@ export class Game {
       if (this.world.big) {
         // No fixed vents on a big map: drones drop in from the sky a short way from the player.
         const a = Math.random() * Math.PI * 2, r = 20 + Math.random() * 12, lim = this.world.collision.half - 16;
-        v = tmpC.set(Math.max(-lim, Math.min(lim, this.player.pos.x + Math.cos(a) * r)), CEIL, Math.max(-lim, Math.min(lim, this.player.pos.z + Math.sin(a) * r)));
+        v = tmpC.set(Math.max(-lim, Math.min(lim, this.player.pos.x + Math.cos(a) * r)), Math.min(this.world.collision.ceil, this.player.pos.y + CEIL), Math.max(-lim, Math.min(lim, this.player.pos.z + Math.sin(a) * r)));
       }
       this.enemies.spawn(type, tmpA.copy(v).add(tmpB.set(Math.random() - 0.5, 0, Math.random() - 0.5)), hp, dmg);
       this.effects.sparks(v, tmpB.set(0, -1, 0), 6, 0.6, 2, 3);

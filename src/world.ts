@@ -8,12 +8,12 @@ import { makeHazardTexture, makeMacroTexture, makeRadialTexture, makeSignTexture
 export const ARENA = 30;
 export const CEIL = 9;
 
-export type ArenaId = 'reactor' | 'foundry' | 'vault' | 'yard' | 'frost' | 'city';
+export type ArenaId = 'reactor' | 'foundry' | 'vault' | 'yard' | 'frost' | 'city' | 'beach';
 /** Order used when the arena changes after each boss. */
-export const ARENA_ORDER: ArenaId[] = ['reactor', 'foundry', 'vault', 'yard', 'frost', 'city'];
+export const ARENA_ORDER: ArenaId[] = ['reactor', 'foundry', 'vault', 'yard', 'frost', 'city', 'beach'];
 /** Half the side of a big free-roam map, against ARENA (30) for the others. */
 export const BIG = 90;
-const BIG_ARENAS: ArenaId[] = ['city'];
+const BIG_ARENAS: ArenaId[] = ['city', 'beach'];
 export const ARENAS: Record<ArenaId, { name: string; blurb: string }> = {
   reactor: { name: 'Reactor Hall', blurb: 'Open floor around the core, with a raised gallery in each corner. Long sightlines.' },
   foundry: { name: 'Foundry', blurb: 'Furnaces and conveyor lines around a molten crucible, with a bridge across the top.' },
@@ -21,6 +21,7 @@ export const ARENAS: Record<ArenaId, { name: string; blurb: string }> = {
   yard: { name: 'Rain Yard', blurb: 'Outdoors at night in the rain. Three levels: container lanes, catwalks, and bridges across the stacks.' },
   frost: { name: 'Frost Outpost', blurb: 'Outdoors in falling snow. Hut roofs joined by bridges, and a lookout up the radio mast.' },
   city: { name: 'City', blurb: 'Big map, free to roam: a plaza, a market street, a construction site, a car park and tenement alleys.' },
+  beach: { name: 'Beach Invasion', blurb: 'Big map, free to roam: surf and landing craft, a pier, lighthouse point, bunkers, a gun battery and a village.' },
 };
 
 /** Colour grade applied after bloom. Tints are multipliers for dark and bright areas. */
@@ -34,6 +35,8 @@ interface Theme {
   corners: [number, number]; cornerI: number; coreLight: number; coreI: number; coreY: number;
   /** Outdoor arenas have no roof, a lower perimeter wall, a sky colour and weather. */
   outdoor?: boolean; sky?: number; weather?: 'rain' | 'snow'; floorRough?: number; env?: number;
+  /** Tint of the soft ground material (snow by default; sand on the beach). */
+  ground?: number;
   /** Reflections come from a room built out of this theme's own lamp colours instead of the neutral studio. */
   ownEnv?: boolean; grade?: Grade;
   /** Tint of the drifting dust motes indoors. */
@@ -77,6 +80,15 @@ const THEMES: Record<ArenaId, Theme> = {
     outdoor: true, sky: 0x0b1017, weather: 'rain', floorRough: 0.5, env: 0.85, wallH: 9,
     ownEnv: true, skyTop: 0x04060a, skyHorizon: 0x303b4b,
     grade: { shadows: [0.86, 0.97, 1.1], highlights: [1.05, 1.0, 0.94], saturation: 0.95, contrast: 1.08, vignette: 0.28 },
+  },
+  beach: {
+    // Overcast dawn over the sea. Sand is kept mid-toned so it stays under the bloom threshold.
+    floor: 0x8a8d92, wall: 0x9c9b93, trim: 0xa3956c, dark: 0x3a3d40,
+    stripA: [1.6, 1.2, 0.6], stripB: [0.6, 1.6, 2.2], core: [3.2, 2.6, 1.4], panel: [1.6, 1.5, 1.3],
+    fog: 0x9aa4ab, fogDensity: 0.0095, hemiSky: 0xc4d0da, hemiGround: 0x8f8266, hemi: 1.3, sun: 0xfff0dc, sunI: 1.35,
+    corners: [0xfff2e0, 0xe6f0ff], cornerI: 30, coreLight: 0xfff2d8, coreI: 20, coreY: 6,
+    outdoor: true, sky: 0x9aa4ab, floorRough: 0.9, env: 0.45, skyTop: 0x5d6c7c, skyHorizon: 0xcfc8b6, ground: 0xb7a274,
+    grade: { shadows: [0.92, 0.98, 1.06], highlights: [1.04, 1.0, 0.95], saturation: 0.9, contrast: 1.06, vignette: 0.22 },
   },
   city: {
     // Dusk: a low warm sun, cool sky light and lit windows.
@@ -204,6 +216,8 @@ export class World {
   /** Current weather, for ambient audio. */
   weather: 'none' | 'rain' | 'snow' = 'none';
   private theme: Theme = THEMES.reactor;
+  /** The sea on the beach map: opaque and glossy, so it costs no blending. */
+  private water = new THREE.MeshStandardMaterial({ color: 0x2c4f5e, roughness: 0.12, metalness: 0.55 });
   /** Half the side of the loaded arena's playable square. */
   half = ARENA;
   /** Set dressing waiting to be merged into one mesh per material at the end of `load`. */
@@ -325,6 +339,7 @@ export class World {
     m.floor.color.setHex(t.floor); m.wall.color.setHex(t.wall); m.trim.color.setHex(t.trim); m.dark.color.setHex(t.dark);
     m.stripA.color.setRGB(...t.stripA); m.stripB.color.setRGB(...t.stripB); m.panel.color.setRGB(...t.panel);
     m.asphalt.roughness = t.floorRough ?? 1;
+    m.snowFloor.color.setHex(t.ground ?? 0xffffff);
     (this.scene.background as THREE.Color).setHex(t.sky ?? 0x06080b);
     this.scene.environmentIntensity = t.env ?? 0.42;
     this.envTarget?.dispose(); this.envTarget = null;
@@ -344,9 +359,9 @@ export class World {
     this.corners.forEach((l, i) => { l.color.setHex(t.corners[i === 0 || i === 3 ? 0 : 1]); l.intensity = t.cornerI; });
     this.coreLight.color.setHex(t.coreLight); this.coreLight.position.set(0, t.coreY, 0);
 
-    this.late = true; if (this.big) this.shellBig(); else this.shell(); this.late = false;
+    this.late = true; if (id === 'beach') this.shellBeach(); else if (this.big) this.shellBig(); else this.shell(); this.late = false;
     if (id === 'reactor') this.buildReactor(); else if (id === 'foundry') this.buildFoundry(); else if (id === 'vault') this.buildVault();
-    else if (id === 'yard') this.buildYard(); else if (id === 'city') this.buildCity(); else this.buildFrost();
+    else if (id === 'yard') this.buildYard(); else if (id === 'city') this.buildCity(); else if (id === 'beach') this.buildBeach(); else this.buildFrost();
     this.flush();
   }
 
@@ -1279,6 +1294,142 @@ export class World {
 
     // Lane paint down the avenues.
     for (let k = -72; k <= 72; k += 6) if (Math.abs(k) > 14) { this.dbox(6, 0.012, k, 0.18, 0.024, 2.6, m.trim, false); this.dbox(-6, 0.012, k, 0.18, 0.024, 2.6, m.trim, false); this.dbox(k, 0.012, 6, 2.6, 0.024, 0.18, m.trim, false); this.dbox(k, 0.012, -6, 2.6, 0.024, 0.18, m.trim, false); }
+  }
+
+  // ---------- Beach invasion (big map) ----------
+
+  /** Sand, the lid, rock cliffs on three sides and open sea on the fourth (+z), walled off invisibly. */
+  private shellBeach() {
+    const H = this.half, m = this.m, edge = H - 14, r = this.rng(307);
+    this.box(0, -0.5, 0, H * 2, 1, H * 2, m.snowFloor, { cast: false, tex: 4 });
+    this.collision.add(0, 14.5, 0, H * 2 + 2, 1, H * 2 + 2);
+    this.collision.add(0, 7, edge + 0.5, H * 2, 14, 1);
+    // The sea: shallows the player can wade into from z = 60, then open water to the horizon.
+    this.dbox(0, 0.06, 210, 640, 0.12, 300, this.water, false, 6);
+    for (const [ax, sgn] of [[1, 1], [1, -1], [0, -1]] as const) {
+      const n = 7, w = (H * 2) / n;
+      for (let i = 0; i < n; i++) {
+        const c = -H + (i + 0.5) * w, h = 15 + Math.floor(r() * 4) * 3, d = 14 + r() * 3, mid = (H - 7) * sgn;
+        if (ax) this.box(mid, h / 2, c, d, h, w + 0.4, m.pillar, { tex: 6 }); else this.box(c, h / 2, mid, w + 0.4, h, d, m.pillar, { tex: 6 });
+      }
+    }
+  }
+
+  /**
+   * Beach invasion: a 180 m square running from the surf (+z) inland to a village (-z), free to
+   * roam. Robots come ashore from landing craft and drop in on marked pads further inland.
+   *   surf and beach   landing craft in the shallows, obstacles on the sand, a sea wall with gaps
+   *   pier (east)      a wooden pier out over the water, reached by a ramp
+   *   lighthouse point (west)   two rock terraces up to the lighthouse
+   *   bunker line      two pillboxes you can enter, with stairs up to their roofs
+   *   battery          a gun platform with an observation post on top
+   *   village          houses and a church round a street, and a ruin with an upper floor
+   */
+  private buildBeach() {
+    const m = this.m, r = this.rng(311), V = (x: number, y: number, z: number) => new THREE.Vector3(x, y, z);
+    this.sky(300);
+    const B = (x0: number, x1: number, z0: number, z1: number, y0: number, y1: number, mat: THREE.Material, o: BoxOpts = {}) =>
+      this.box((x0 + x1) / 2, (y0 + y1) / 2, (z0 + z1) / 2, x1 - x0, y1 - y0, z1 - z0, mat, o);
+    const crate = (x: number, z: number, s: number, mat: THREE.Material = m.crate, y0 = 0) => B(x - s / 2, x + s / 2, z - s / 2, z + s / 2, y0, y0 + s, mat, { tex: s });
+    const pad = (x: number, z: number) => {
+      this.gates.push({ pos: V(x, 0, z), dir: V(-x, 0, 9 - z).normalize() });
+      this.d(new THREE.RingGeometry(1.5, 1.9, 24), m.hazard, x, 0.02, z, { rx: -Math.PI / 2, cast: false });
+      this.lamp(x, 0.03, z, 0.5, 0.04, 0.5, m.red);
+    };
+    const house = (x0: number, x1: number, z0: number, z1: number, h: number, mat: THREE.Material) => {
+      B(x0, x1, z0, z1, 0, h, mat, { tex: 5 });
+      this.dbox((x0 + x1) / 2, h + 0.15, (z0 + z1) / 2, x1 - x0 + 0.6, 0.3, z1 - z0 + 0.6, m.dark);
+      this.windows(x0, x1, z0, z1, h + 1.2, r);
+    };
+
+    // --- Surf: landing craft the robots come ashore from ---
+    for (const x of [-48, -16, 16, 48]) {
+      B(x - 2.4, x - 2.1, 59, 70, 0, 1.9, m.contB, { tex: 3 }); B(x + 2.1, x + 2.4, 59, 70, 0, 1.9, m.contB, { tex: 3 });
+      B(x - 2.4, x + 2.4, 69.7, 70, 0, 2.6, m.contB, { tex: 3 });
+      this.dbox(x, 0.2, 57.4, 4.2, 0.12, 3.2, m.dark);
+      this.lamp(x, 2.3, 69.66, 2.4, 0.3, 0.04, m.red);
+      this.gates.push({ pos: V(x, 0, 61), dir: V(0, 0, -1) });
+    }
+    // Ships standing off on the horizon (dressing only).
+    for (const [x, z, l] of [[-120, 190, 60], [40, 230, 80], [150, 170, 50]]) { this.dbox(x, 4, z, l, 8, 9, m.dark, false); this.dbox(x - l * 0.15, 11, z, l * 0.25, 6, 6, m.dark, false); }
+
+    // --- Beach: obstacles on the sand and a sea wall with gaps ---
+    for (let i = 0; i < 22; i++) {
+      const x = -68 + ((i * 6.4 + r() * 3) % 136), z = 34 + r() * 20;
+      // Keep the pier ramp, lighthouse point and the mid-beach spawn pad clear.
+      if (Math.abs(x - 55) < 6 || x < -44 || Math.abs(x) < 4) continue;
+      if (i % 3 === 0) crate(x, z, 1.3, m.dark); else this.barrier(x, z, i % 2 ? 2.4 : 0.6, i % 2 ? 0.6 : 2.4);
+    }
+    for (let k = -3; k <= 3; k++) {
+      // Wall sections between 6 m gaps at x = -60, -36, -12, 12, 36, 60.
+      const c = k * 24, half = k === -3 || k === 3 ? 6.5 : 9;
+      if (Math.abs(c) < 80) B(Math.max(-76, c - half), Math.min(76, c + half), 28, 29.6, 0, 1.6, m.wall, { tex: 3 });
+    }
+
+    // --- East: pier ---
+    B(52, 58, 50, 76, 1.2, 1.4, m.crate, { tex: 3 });
+    for (let z = 52; z <= 74; z += 5.5) for (const x of [52.4, 57.6]) B(x - 0.2, x + 0.2, z - 0.2, z + 0.2, 0, 1.2, m.dark, { tex: 1 });
+    this.flight(55, 46.4, 'z', 1, 3.6, 3, 0, 1.4, { ramp: true });
+    crate(53.2, 66, 1.2, m.crate, 1.4); crate(56.8, 58, 1.0, m.crate2, 1.4); crate(56.6, 72, 1.3, m.crate2, 1.4);
+    house(62, 70, 40, 46, 4.2, m.contA);
+
+    // --- West: lighthouse point ---
+    B(-76, -52, 34, 58, 0, 2.6, m.pillar, { tex: 4 });
+    B(-76, -62, 40, 52, 2.6, 5.2, m.pillar, { tex: 4 });
+    this.flight(-45.4, 46, 'x', -1, 6.6, 3, 0, 2.6, { ramp: true });
+    this.flight(-55.4, 46, 'x', -1, 6.6, 3, 2.6, 5.2, { solid: true });
+    B(-71, -67, 44, 48, 5.2, 21, m.wall, { tex: 4 });
+    this.lamp(-69, 19, 46, 4.2, 1.2, 4.2, m.core);
+    this.dbox(-69, 21.4, 46, 4.8, 0.8, 4.8, m.dark);
+    crate(-58, 37, 1.3, m.crate, 2.6); crate(-56, 55, 1.2, m.crate2, 2.6);
+
+    // --- Bunker line: two pillboxes with a firing slit to seaward, a door at the back and a roof to stand on ---
+    for (const s of [1, -1]) {
+      const x0 = 36 * s - 6, x1 = 36 * s + 6;
+      B(x0, x0 + 0.6, 10, 20, 0, 2.6, m.wall); B(x1 - 0.6, x1, 10, 20, 0, 2.6, m.wall);
+      B(x0, x1, 19.4, 20, 0, 1.1, m.wall); B(x0, x1, 19.4, 20, 1.7, 2.6, m.wall);
+      B(x0, 36 * s - 1.5, 10, 10.6, 0, 2.6, m.wall); B(36 * s + 1.5, x1, 10, 10.6, 0, 2.6, m.wall);
+      B(36 * s - 1.5, 36 * s + 1.5, 10, 10.6, 2.2, 2.6, m.wall);
+      B(x0, x1, 10, 20, 2.6, 3.0, m.wall, { tex: 4 });
+      this.flight(36 * s - 4.5 * s, 2.4, 'z', 1, 7.6, 3, 0, 3.0, { solid: true });
+      crate(36 * s + 3.5, 16, 1.2); crate(36 * s - 3.4, 13, 1.0, m.crate2);
+      // Sandbag walls between and beside the bunkers.
+      this.barrier(14 * s, 22, 10, 0.8); this.barrier(58 * s, 22, 10, 0.8); this.barrier(22 * s, 14, 0.8, 8); this.barrier(50 * s, 14, 0.8, 8);
+      this.barrier(40 * s, -8, 16, 0.8); this.barrier(64 * s, -24, 0.8, 14);
+    }
+
+    // --- Battery: a gun platform with stairs on one side and a ramp on the other, and a post on top ---
+    B(-9, 9, -30, -16, 0, 2.6, m.wall, { tex: 4 });
+    this.flight(15.6, -20, 'x', -1, 6.6, 3, 0, 2.6, { ramp: true });
+    this.flight(-15.6, -20, 'x', 1, 6.6, 3, 0, 2.6, { solid: true });
+    B(-9, -4, -30, -25, 2.6, 5.2, m.wall, { tex: 3 });
+    this.flight(2.6, -27.5, 'x', -1, 6.6, 3, 2.6, 5.2, { solid: true });
+    B(3.5, 6.5, -25, -22, 2.6, 4.0, m.dark, { tex: 1.5 });
+    this.dpipe(V(5, 3.9, -22.5), V(5, 5.6, -14.5), 0.32, m.dark);
+    this.dbox(5, 4.2, -23.5, 3.6, 0.5, 3.6, m.trim);
+
+    // --- Village: a street of houses, a church, and a ruin with an upper floor ---
+    house(-60, -48, -50, -40, 7.5, m.contA); house(-40, -28, -50, -40, 8.5, m.wall);
+    house(28, 40, -50, -40, 8, m.wall); house(48, 60, -50, -40, 7, m.contA);
+    house(-56, -44, -72, -60, 8, m.wall); house(-34, -20, -72, -61, 7, m.contA);
+    house(22, 34, -72, -60, 8.5, m.contA); house(44, 58, -72, -61, 7.5, m.wall);
+    B(-7, 7, -74, -60, 0, 10, m.wall, { tex: 5 }); B(-3, 3, -70, -64, 10, 22, m.wall, { tex: 4 });
+    this.dbox(0, 22.4, -67, 6.8, 0.8, 6.8, m.dark); this.lamp(0, 7, -59.96, 1.6, 3.2, 0.04, m.stripA);
+    // Ruin: outer walls with a doorway to the street, stairs inside up to what is left of the upper floor.
+    B(-12, -11.4, -48, -38, 0, 6.2, m.contA); B(11.4, 12, -48, -38, 0, 4.4, m.contA);
+    B(-12, 12, -38.6, -38, 0, 5.4, m.contA, { tex: 4 });
+    B(-12, 3, -48, -47.4, 0, 6.2, m.contA, { tex: 4 }); B(6, 12, -48, -47.4, 0, 3.6, m.contA); B(3, 6, -48, -47.4, 2.6, 3.4, m.contA);
+    B(-11.4, 1.4, -47.4, -38.6, 3.0, 3.2, m.crate, { tex: 3 });
+    this.flight(9.4, -40.5, 'x', -1, 8, 3, 0, 3.2);
+    crate(-8, -44, 1.2, m.crate, 3.2); crate(8.5, -45, 1.3); crate(-4, -41, 1.0, m.crate2);
+    // Yard walls, a well and carts along the street.
+    this.barrier(-22, -55, 0.8, 6); this.barrier(18, -56, 6, 0.8); this.barrier(-44, -34, 10, 0.8); this.barrier(44, -34, 10, 0.8);
+    B(15.2, 16.8, -45.8, -44.2, 0, 1.1, m.pillar, { tex: 1 });
+    crate(-18, -44, 1.4, m.crate2); crate(40, -55, 1.5); crate(41.6, -54.4, 1.0, m.crate2); crate(-40, -56, 1.5); crate(62, -56, 1.2, m.crate2);
+
+    // Pads inland, used when the player is too far from the landing craft.
+    for (const s of [1, -1]) { pad(62 * s, 12); pad(22 * s, -6); pad(58 * s, -30); pad(30 * s, -64); pad(68 * s, -68); }
+    pad(0, 38); pad(0, -44);
   }
 
   update(t: number, dt = 0, cam?: THREE.Vector3) {

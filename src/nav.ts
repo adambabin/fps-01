@@ -55,10 +55,11 @@ export class FlowField {
       tops.length = 0;
       for (const b of near[c]) if (cx > b.min.x && cx < b.max.x && cz > b.min.z && cz < b.max.z && b.max.y > -0.05 && b.max.y < 12) tops.push(b.max.y);
       tops.sort((a, b) => a - b);
-      let last = -99;
-      for (const t of tops) {
-        if (t - last < 0.05 || count[c] >= K) continue;
-        last = t;
+      for (let i = 0; i < tops.length && count[c] < K; i++) {
+        const t = tops[i];
+        // A top with another just above it (a stair tread on the floor, a cap on a box) is
+        // buried: the upper one is what gets stood on.
+        if (i + 1 < tops.length && tops[i + 1] - t < BODY_LO) continue;
         const held = (x: number, z: number) => near[c].some((b) => Math.abs(b.max.y - t) <= ROBOT_STEP && x > b.min.x && x < b.max.x && z > b.min.z && z < b.max.z);
         if (!obstructed(c, t) && held(cx - EDGE, cz) && held(cx + EDGE, cz) && held(cx, cz - EDGE) && held(cx, cz + EDGE)) h[c * K + count[c]++] = t;
       }

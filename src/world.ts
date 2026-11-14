@@ -8,12 +8,12 @@ import { makeHazardTexture, makeMacroTexture, makeRadialTexture, makeSignTexture
 export const ARENA = 30;
 export const CEIL = 9;
 
-export type ArenaId = 'reactor' | 'foundry' | 'vault' | 'yard' | 'frost' | 'city' | 'beach' | 'skyrise';
+export type ArenaId = 'reactor' | 'foundry' | 'vault' | 'yard' | 'frost' | 'city' | 'beach' | 'skyrise' | 'bridge';
 /** Order used when the arena changes after each boss. */
-export const ARENA_ORDER: ArenaId[] = ['reactor', 'foundry', 'vault', 'yard', 'frost', 'city', 'beach', 'skyrise'];
+export const ARENA_ORDER: ArenaId[] = ['reactor', 'foundry', 'vault', 'yard', 'frost', 'city', 'beach', 'skyrise', 'bridge'];
 /** Half the side of a big free-roam map, against ARENA (30) for the others. */
 export const BIG = 90;
-const BIG_ARENAS: ArenaId[] = ['city', 'beach', 'skyrise'];
+const BIG_ARENAS: ArenaId[] = ['city', 'beach', 'skyrise', 'bridge'];
 export const ARENAS: Record<ArenaId, { name: string; blurb: string }> = {
   reactor: { name: 'Reactor Hall', blurb: 'Open floor around the core, with a raised gallery in each corner. Long sightlines.' },
   foundry: { name: 'Foundry', blurb: 'Furnaces and conveyor lines around a molten crucible, with a bridge across the top.' },
@@ -22,6 +22,7 @@ export const ARENAS: Record<ArenaId, { name: string; blurb: string }> = {
   frost: { name: 'Frost Outpost', blurb: 'Outdoors in falling snow. Hut roofs joined by bridges, and a lookout up the radio mast.' },
   city: { name: 'City', blurb: 'Big map, free to roam: a plaza, a market street, a construction site, a car park and tenement alleys.' },
   skyrise: { name: 'Skyrise', blurb: 'Big map, free to roam: a four-floor tower with lifts, a roof garden, a helipad, sky-bridges and a monorail stop.' },
+  bridge: { name: 'Bridge', blurb: 'Big map, free to roam: a suspension bridge between two banks, a walkway under the deck and the tidal flats below.' },
   beach: { name: 'Beach Invasion', blurb: 'Big map, free to roam: surf and landing craft, a pier, lighthouse point, bunkers, a gun battery and a village.' },
 };
 
@@ -101,6 +102,15 @@ const THEMES: Record<ArenaId, Theme> = {
     corners: [0x9fd0ff, 0xff9fe0], cornerI: 160, coreLight: 0x9fdcff, coreI: 100, coreY: 6,
     outdoor: true, sky: 0x0c1020, env: 0.7, skyTop: 0x05060e, skyHorizon: 0x2a2f5a, ceil: 20,
     grade: { shadows: [0.88, 0.95, 1.12], highlights: [1.0, 1.0, 1.06], saturation: 1.08, contrast: 1.07, vignette: 0.26 },
+  },
+  bridge: {
+    // A grey, misty day over the river; the towers fade into the fog.
+    floor: 0x8a8d92, wall: 0x8d9299, trim: 0xb0a79a, dark: 0x34383f,
+    stripA: [1.8, 1.2, 0.5], stripB: [0.6, 1.6, 2.2], core: [3.0, 1.4, 0.5], panel: [1.6, 1.5, 1.3],
+    fog: 0x8f9aa3, fogDensity: 0.011, hemiSky: 0xc0ccd6, hemiGround: 0x6c665a, hemi: 1.25, sun: 0xfff0e0, sunI: 1.3,
+    corners: [0xfff2e0, 0xe6f0ff], cornerI: 20, coreLight: 0xfff2d8, coreI: 15, coreY: 16,
+    outdoor: true, sky: 0x8f9aa3, floorRough: 0.8, env: 0.45, skyTop: 0x66747f, skyHorizon: 0xc4c9cc, ground: 0x7a715f, ceil: 25,
+    grade: { shadows: [0.92, 0.97, 1.05], highlights: [1.03, 1.0, 0.96], saturation: 0.88, contrast: 1.06, vignette: 0.22 },
   },
   city: {
     // Dusk: a low warm sun, cool sky light and lit windows.
@@ -232,6 +242,8 @@ export class World {
   private water = new THREE.MeshStandardMaterial({ color: 0x2c4f5e, roughness: 0.12, metalness: 0.55 });
   /** Half the side of the loaded arena's playable square. */
   half = ARENA;
+  /** Where the player starts in the loaded arena. On the floor at (0, 0, 9) unless a map says otherwise. */
+  spawn = new THREE.Vector3(0, 0, 9);
   /** Set dressing waiting to be merged into one mesh per material at the end of `load`. */
   private batches = new Map<string, { mat: THREE.Material; cast: boolean; receive: boolean; late: boolean; geos: THREE.BufferGeometry[] }>();
   /** True while the floor, walls and ceiling are being built: they are drawn after everything else so the props in front hide them first. */
@@ -346,6 +358,7 @@ export class World {
     this.gates = []; this.vents = [];
     this.half = this.collision.half = BIG_ARENAS.includes(id) ? BIG : ARENA;
     this.collision.ceil = THEMES[id].ceil ?? CEIL;
+    this.spawn.set(0, 0, 9);
     this.sun.position.set(14, 34, 9); this.sun.target.position.set(0, 0, 0); this.sun.target.updateMatrixWorld();
 
     const t = this.theme = THEMES[id], m = this.m;
@@ -372,9 +385,9 @@ export class World {
     this.corners.forEach((l, i) => { l.color.setHex(t.corners[i === 0 || i === 3 ? 0 : 1]); l.intensity = t.cornerI; });
     this.coreLight.color.setHex(t.coreLight); this.coreLight.position.set(0, t.coreY, 0);
 
-    this.late = true; if (id === 'beach') this.shellBeach(); else if (this.big) this.shellBig(id === 'skyrise' ? this.m.floor : undefined); else this.shell(); this.late = false;
+    this.late = true; if (id === 'beach') this.shellBeach(); else if (id === 'bridge') { /* buildBridge makes its own ground and walls */ } else if (this.big) this.shellBig(id === 'skyrise' ? this.m.floor : undefined); else this.shell(); this.late = false;
     if (id === 'reactor') this.buildReactor(); else if (id === 'foundry') this.buildFoundry(); else if (id === 'vault') this.buildVault();
-    else if (id === 'yard') this.buildYard(); else if (id === 'city') this.buildCity(); else if (id === 'beach') this.buildBeach(); else if (id === 'skyrise') this.buildSkyrise(); else this.buildFrost();
+    else if (id === 'yard') this.buildYard(); else if (id === 'city') this.buildCity(); else if (id === 'beach') this.buildBeach(); else if (id === 'skyrise') this.buildSkyrise(); else if (id === 'bridge') this.buildBridge(); else this.buildFrost();
     this.flush();
   }
 
@@ -1571,6 +1584,147 @@ export class World {
       this.dbox(x * sx, 3.2, z, 0.16, 6.4, 0.16, m.dark);
       this.lamp(x * sx, 6.45, z, 1.1, 0.12, 0.4, m.panel);
     }
+  }
+
+  // ---------- Bridge (big map) ----------
+
+  /**
+   * The Bridge: a suspension bridge across a tidal river, 180 m square, free to roam. The road
+   * deck and both banks are 10 m up; the river bed below is dry enough at low tide to walk on.
+   *   road deck        wrecks and barriers along 100 m of roadway between two towers
+   *   west bank        a checkpoint: toll booths, a guardhouse and a watchtower
+   *   east bank        a depot: containers, a warehouse and a loading dock
+   *   under the deck   a maintenance walkway, reached by stair galleries at the towers
+   *   tidal flats      the river bed: a beached barge, wrecks and rocks, with stairs up each bank
+   *                    and up to the walkway at mid-span
+   * The player starts on the deck (`World.spawn`).
+   */
+  private buildBridge() {
+    const m = this.m, H = this.half, V = (x: number, y: number, z: number) => new THREE.Vector3(x, y, z), D = 10, W = 5.6;
+    this.sky(300);
+    this.spawn.set(0, D, 5);
+    const B = (x0: number, x1: number, z0: number, z1: number, y0: number, y1: number, mat: THREE.Material, o: BoxOpts = {}) =>
+      this.box((x0 + x1) / 2, (y0 + y1) / 2, (z0 + z1) / 2, x1 - x0, y1 - y0, z1 - z0, mat, o);
+    const crate = (x: number, z: number, s: number, y0 = 0, mat: THREE.Material = m.crate) => B(x - s / 2, x + s / 2, z - s / 2, z + s / 2, y0, y0 + s, mat, { tex: s });
+    const cover = (x: number, z: number, sx: number, sz: number, y0 = 0) => B(x - sx / 2, x + sx / 2, z - sz / 2, z + sz / 2, y0, y0 + 1.2, m.trim, { tex: 2 });
+    const post = (x: number, z: number, y0: number, top: number) => B(x - 0.2, x + 0.2, z - 0.2, z + 0.2, y0, top - 0.2, m.dark, { tex: 1 });
+    const car = (x: number, z: number, alongX: boolean, mat: THREE.Material, y0: number) => {
+      const l = 2.2, w = 0.95;
+      B(x - (alongX ? l : w), x + (alongX ? l : w), z - (alongX ? w : l), z + (alongX ? w : l), y0, y0 + 1.0, mat, { tex: 2 });
+      B(x - (alongX ? 1.1 : 0.85), x + (alongX ? 1.1 : 0.85), z - (alongX ? 0.85 : 1.1), z + (alongX ? 0.85 : 1.1), y0 + 1.0, y0 + 1.6, m.dark, { tex: 1 });
+    };
+    const pad = (x: number, y: number, z: number) => {
+      this.gates.push({ pos: V(x, y, z), dir: V(-x, 0, -z).normalize() });
+      this.d(new THREE.RingGeometry(1.5, 1.9, 24), m.hazard, x, y + 0.02, z, { rx: -Math.PI / 2, cast: false });
+      this.lamp(x, y + 0.03, z, 0.5, 0.04, 0.5, m.red);
+    };
+
+    // --- Shell: river bed, lid, invisible walls up and down river, water beyond them ---
+    this.box(0, -0.5, 0, H * 2, 1, H * 2, m.snowFloor, { cast: false, tex: 4 });
+    this.collision.add(0, this.collision.ceil + 5.5, 0, H * 2 + 2, 1, H * 2 + 2);
+    for (const s of [1, -1]) {
+      this.collision.add(0, 15, (H - 13.5) * s, H * 2, 30, 1);
+      this.dbox(0, 0.06, (H - 14 + 160) * s, 100, 0.12, 320, this.water, false, 6);
+      // The banks carry on up and down river as scenery.
+      for (const b of [1, -1]) this.dbox(170 * b, 5, 240 * s, 240, 10, 300, m.pillar, false, 8);
+    }
+    // A channel of standing water down the middle of the flats.
+    this.dbox(0, 0.06, 0, 14, 0.12, (H - 14) * 2, this.water, false, 6);
+
+    // --- Banks: plateaus at deck height with a wall of buildings behind ---
+    for (const s of [1, -1]) {
+      B(s > 0 ? 50 : -H, s > 0 ? H : -50, -H, H, 0, D, m.wall, { tex: 6 });
+      this.dbox(63 * s, D + 0.02, 0, 26, 0.04, 152, m.asphalt, false, 4);
+      const x0 = s > 0 ? H - 14 : -H, r = this.rng(500 + s);
+      for (let i = 0; i < 6; i++) {
+        const c = -H + (i + 0.5) * 30, h = 14 + Math.floor(r() * 4) * 4;
+        B(x0, x0 + 14, c - 15, c + 15, D, D + h, i % 2 ? m.pillar : m.contB, { tex: 6 });
+        this.windows(x0, x0 + 14, c - 15, c + 15, D + h, r, s > 0 ? 'x-' : 'x+');
+      }
+      // Doors in those buildings are spawn points.
+      for (const z of [-40, 0, 40]) {
+        const fx = (H - 14.06) * s;
+        this.gates.push({ pos: V((H - 17) * s, D, z), dir: V(-s, 0, 0) });
+        this.dbox(fx, D + 1.9, z, 0.1, 3.8, 5.4, m.dark, false);
+        this.lamp((H - 14.2) * s, D + 3.95, z, 0.1, 0.12, 4.8, m.red);
+      }
+    }
+
+    // --- Road deck, rails, towers and cables ---
+    B(-50, 50, -9, 9, D - 1, D, m.asphalt, { tex: 4 });
+    // Rails, open where the stair galleries meet the deck (west tower on +z, east tower on -z).
+    B(-50, -25.1, 8.7, 9, D, D + 1, m.trim, { tex: 2 }); B(-21, 50, 8.7, 9, D, D + 1, m.trim, { tex: 2 });
+    B(-50, 21, -9, -8.7, D, D + 1, m.trim, { tex: 2 }); B(25.1, 50, -9, -8.7, D, D + 1, m.trim, { tex: 2 });
+    for (const tx of [-25, 25]) {
+      for (const tz of [-14, 14]) { B(tx - 3, tx + 3, tz - 3, tz + 3, 0, 1.5, m.wall, { tex: 3 }); B(tx - 1, tx + 1, tz - 1, tz + 1, 1.5, 31, m.contA, { tex: 2 }); }
+      for (const y of [8.4, 20, 30.2]) this.dbox(tx, y, 0, 1.6, 1.4, 28, m.contA);
+      // Main cables down to each bank and to mid-span, with hangers to the deck.
+      for (const tz of [-14, 14]) {
+        this.dpipe(V(tx, 31, tz), V(Math.sign(tx) * 76, D + 3, tz), 0.22, m.contA, false);
+        this.dpipe(V(tx, 31, tz), V(0, D + 4, tz), 0.22, m.contA, false);
+        for (let k = 1; k <= 4; k++) {
+          const a = tx - Math.sign(tx) * k * 5, b = tx + Math.sign(tx) * k * 5, top = (d: number, far: number, low: number) => 31 - (31 - low) * (d / far);
+          this.dbox(a, (top(k * 5, 25, D + 4) + D) / 2, tz, 0.08, top(k * 5, 25, D + 4) - D, 0.08, m.dark, false);
+          this.dbox(b, (top(k * 5, 51, D + 3) + D) / 2, tz, 0.08, top(k * 5, 51, D + 3) - D, 0.08, m.dark, false);
+        }
+      }
+    }
+    // Deck beams out to the cable line, so the hangers have something to hold.
+    for (let x = -45; x <= 45; x += 5) this.dbox(x, D - 0.6, 0, 0.5, 0.7, 29, m.dark);
+    // Wrecks and barriers along the road.
+    car(-40, -4, true, m.contA, D); car(-31, 4.5, true, m.trim, D); car(-12, -5, false, m.contB, D); car(14, 4, true, m.contA, D); car(33, -4.5, true, m.trim, D); car(43, 3.5, false, m.contB, D);
+    B(-6.5, 4.5, -6.2, -3.2, D, D + 3.0, m.contB, { tex: 3 }); this.lamp(-1, D + 2.1, -3.16, 9.6, 0.9, 0.04, m.panel);
+    for (const [x, z, sx, sz] of [[-20, 0, 0.6, 6], [-36, -1, 5, 0.6], [22, -1, 0.6, 6], [8, -2, 5, 0.6], [38, 1, 5, 0.6], [-46, 5, 0.6, 5]]) cover(x, z, sx, sz, D);
+    crate(-16, 6, 1.4, D); crate(27, 6.5, 1.3, D, m.crate2); crate(-2, 7, 1.2, D, m.crate2);
+    pad(40, D, 0); pad(-40, D, 0);
+
+    // --- Under the deck: maintenance walkway and the stair galleries at the towers ---
+    B(-50, 50, -2, 2, W - 0.2, W, m.dark, { tex: 2 });
+    for (const s of [1, -1]) { this.lamp(0, W - 0.1, 2.02 * s, 100, 0.06, 0.04, m.stripB); for (let x = -45; x <= 45; x += 10) this.dbox(x, (W + D - 1) / 2, 1.9 * s, 0.08, D - 1 - W, 0.08, m.dark, false); }
+    for (const s of [1, -1]) {
+      // West tower on the +z side, east tower mirrored on -z.
+      this.flight(-36.1 * s, 11.1 * s, 'x', s, 11, 3, W, D);
+      B(Math.min(-25.1 * s, -21 * s), Math.max(-25.1 * s, -21 * s), Math.min(9 * s, 12.6 * s), Math.max(9 * s, 12.6 * s), D - 0.3, D, m.dark, { tex: 2 });
+      B(Math.min(-39.1 * s, -36.1 * s), Math.max(-39.1 * s, -36.1 * s), Math.min(2 * s, 12.6 * s), Math.max(2 * s, 12.6 * s), W - 0.2, W, m.dark, { tex: 2 });
+      crate(-12 * s, 0.4 * s, 1.1, W, m.crate2);
+    }
+    // Mid-span: a landing off the walkway and stairs down to the flats.
+    B(-1.5, 1.6, 2, 6, W - 0.2, W, m.dark, { tex: 2 });
+    this.flight(15.6, 4.5, 'x', -1, 14, 3, 0, W);
+
+    // --- Banks: stairs up from the flats (west on +z, east on -z), then what stands on each plateau ---
+    for (const s of [1, -1]) {
+      const x = -48.5 * s;
+      this.flight(x, 40.1 * s, 'z', -s, 12.5, 3, 0, 5, { solid: true });
+      this.deck(x, 26.1 * s, 3, 3, 5);
+      this.flight(x, 24.6 * s, 'z', -s, 12.5, 3, 5, D);
+      B(Math.min(-50 * s, -47 * s), Math.max(-50 * s, -47 * s), Math.min(9.1 * s, 12.1 * s), Math.max(9.1 * s, 12.1 * s), D - 0.3, D, m.dark, { tex: 2 });
+      post(x - 1.2 * s, 25 * s, 0, 5); post(x - 1.2 * s, 10.6 * s, 0, D);
+    }
+    // West: checkpoint.
+    for (const z of [-6, 0, 6]) { B(-60, -58, z - 1, z + 1, D, D + 2.8, m.contB, { tex: 2 }); this.lamp(-57.96, D + 1.9, z, 0.04, 0.6, 1.4, m.stripA); }
+    B(-65, -53, -11, 11, D + 3.6, D + 3.9, m.dark, { tex: 3 }); for (const z of [-10.5, 10.5]) for (const x of [-64.5, -53.5]) post(x, z, D, D + 3.8);
+    B(-74, -66, 20, 30, D, D + 4, m.wall, { tex: 4 }); this.windows(-74, -66, 20, 30, D + 5.2, this.rng(601), 'x+z-');
+    this.flight(-72, 46.1, 'z', -1, 10, 3, D, D + 4, { solid: true }); this.deck(-72, 33.1, 4, 6, D + 4);
+    post(-73.6, 30.6, D, D + 4); post(-70.4, 30.6, D, D + 4);
+    B(-70, -67, -34, -27, D, D + 3, m.contA, { tex: 3 }); B(-70, -67.2, -26.6, -24, D, D + 2.4, m.dark, { tex: 2 });
+    for (const [x, z, sx, sz] of [[-56, 16, 0.6, 6], [-64, -16, 6, 0.6], [-54, -40, 0.6, 6], [-62, 54, 6, 0.6], [-56, 62, 0.6, 5], [-66, -52, 6, 0.6]]) cover(x, z, sx, sz, D);
+    crate(-58, 40, 1.5, D); crate(-59.6, 40.6, 1.1, D, m.crate2); crate(-56, -24, 1.4, D, m.crate2); crate(-70, -60, 1.5, D); car(-62, -46, false, m.trim, D); car(-55, 30, true, m.contA, D);
+    // East: depot.
+    B(62, 76, -40, -20, D, D + 7, m.contA, { tex: 5 });
+    B(56, 62, -36, -24, D, D + 1.2, m.wall, { tex: 3 }); this.flight(52.1, -30, 'x', 1, 3.9, 3, D, D + 1.2, { ramp: true });
+    for (const [x, z, ax] of [[58, 14, 1], [58, 16.6, 1], [70, 26, 0], [66, 48, 1], [56, 58, 0], [70, 60, 1]] as const) B(x - (ax ? 3.1 : 1.3), x + (ax ? 3.1 : 1.3), z - (ax ? 1.3 : 3.1), z + (ax ? 1.3 : 3.1), D, D + 2.6, x % 4 ? m.contB : m.contA, { tex: 2.6 });
+    B(54.9, 61.1, 14, 15.3, D + 2.6, D + 5.2, m.contA, { tex: 2.6 });
+    for (const [x, z, sx, sz] of [[56, -8, 0.6, 6], [64, 4, 6, 0.6], [54, 36, 0.6, 6], [62, -52, 6, 0.6], [56, -62, 0.6, 5]]) cover(x, z, sx, sz, D);
+    crate(58, -28, 1.3, D + 1.2); crate(60, -33, 1.1, D + 1.2, m.crate2); crate(66, -10, 1.5, D); crate(60, 38, 1.4, D, m.crate2); car(68, -56, true, m.contB, D); car(57, 26, false, m.trim, D);
+
+    // --- Tidal flats: a beached barge, a wreck, rocks ---
+    B(20, 44, 30, 42, 0, 2, m.contB, { tex: 4 }); this.flight(14.9, 36, 'x', 1, 5.1, 3, 0, 2, { ramp: true });
+    B(36, 43, 31, 41, 2, 4.4, m.wall, { tex: 3 }); crate(24, 33, 1.4, 2); crate(30, 40, 1.2, 2, m.crate2);
+    B(-42, -30, -52, -47, 0, 1.6, m.contA, { tex: 3 }); B(-38, -34, -51, -48, 1.6, 3.0, m.dark, { tex: 2 });
+    for (const [x, z, sx, sz, h] of [[-30, 30, 4, 3, 1.6], [-18, 52, 3, 4, 1.2], [12, -34, 4, 3, 1.8], [34, -50, 3, 3, 1.4], [-12, -58, 5, 3, 1.5], [38, 8, 3, 4, 1.3], [-38, -14, 3, 3, 1.7], [18, 62, 4, 3, 1.4], [-34, 62, 3, 3, 1.2], [30, -22, 3, 3, 1.5]])
+      B(x - sx / 2, x + sx / 2, z - sz / 2, z + sz / 2, 0, h, m.pillar, { tex: 2 });
+    for (const [x, z] of [[30, 55], [-30, 46], [30, -45], [-30, -40], [18, -64], [-18, 28]]) pad(x, 0, z);
   }
 
   update(t: number, dt = 0, cam?: THREE.Vector3) {

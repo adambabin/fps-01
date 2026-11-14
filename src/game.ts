@@ -432,7 +432,7 @@ export class Game {
     const next = ARENA_ORDER[(ARENA_ORDER.indexOf(this.world.current!) + 1) % ARENA_ORDER.length];
     this.enemies.clear(); this.projectiles.clear(); this.pickups.clear(); this.effects.clear(); this.shockwaves.clear(); this.boss = null;
     this.loadArena(next);
-    this.player.pos.set(0, 0, 9); this.player.vel.set(0, 0, 0); this.player.yaw = Math.PI; this.player.pitch = 0;
+    this.player.pos.copy(this.world.spawn); this.player.vel.set(0, 0, 0); this.player.yaw = Math.PI; this.player.pitch = 0;
     this.ui.fade();
     this.ui.announce(ARENAS[next].name.toUpperCase(), 'NEW ARENA', 3);
   }
@@ -445,6 +445,7 @@ export class Game {
     this.audio.startAmbient();
     this.enemies.clear(); this.projectiles.clear(); this.pickups.clear(); this.effects.clear(); this.shockwaves.clear(); this.boss = null;
     this.player.reset(); this.weapons.reset();
+    this.player.pos.copy(this.world.spawn);
     this.applyDifficulty();
     this.wave = 0; this.score = 0; this.kills = 0; this.lifesteal = 0; this.runTime = 0;
     this.meleeArmor = 0; this.bonusCard = false; this.objectives.clear();
@@ -765,8 +766,12 @@ export class Game {
       tmpA.set((Math.random() - 0.5) * 44, 1, (Math.random() - 0.5) * 44);
       // On a big map the zone goes somewhere around the player, not around the map centre.
       if (this.world.big) { const lim = this.world.collision.half - 18; tmpA.x = Math.max(-lim, Math.min(lim, tmpA.x + this.player.pos.x)); tmpA.z = Math.max(-lim, Math.min(lim, tmpA.z + this.player.pos.z)); }
-      if (tmpA.distanceTo(this.player.pos) < 10 || this.world.collision.overlaps(tmpA, h)) continue;
-      return tmpA.clone().setY(0);
+      // The zone sits on the player's own level (their floor of a tower, the deck of a bridge).
+      const w = this.world.collision, p = this.player.pos, floor = w.groundAt(p.x, p.z, p.y + 0.6), y = this.world.big ? w.groundAt(tmpA.x, tmpA.z, p.y + 0.6) : 0;
+      if (Math.abs(y - (this.world.big ? floor : 0)) > 0.5) continue;
+      tmpA.y = y + 1;
+      if (tmpA.distanceTo(p) < 10 || w.overlaps(tmpA, h)) continue;
+      return tmpA.clone().setY(y);
     }
     return null;
   }
@@ -917,8 +922,9 @@ export class Game {
     }
     else if (this.state === 'menu') {
       const a = this.time * 0.07;
-      this.camera.position.set(Math.cos(a) * 21, 4.6, Math.sin(a) * 21);
-      this.camera.lookAt(0, 2.6, 0);
+      const y0 = this.world.spawn.y;
+      this.camera.position.set(Math.cos(a) * 21, y0 + 4.6, Math.sin(a) * 21);
+      this.camera.lookAt(0, y0 + 2.6, 0);
       this.setFov(60);
       this.effects.update(dt);
     } else if (this.state === 'dead') {

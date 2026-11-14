@@ -12,11 +12,11 @@ export type ArenaId = 'reactor' | 'foundry' | 'vault' | 'yard' | 'frost';
 /** Order used when the arena changes after each boss. */
 export const ARENA_ORDER: ArenaId[] = ['reactor', 'foundry', 'vault', 'yard', 'frost'];
 export const ARENAS: Record<ArenaId, { name: string; blurb: string }> = {
-  reactor: { name: 'Reactor Hall', blurb: 'Open floor around the core. Long sightlines, scattered cover.' },
-  foundry: { name: 'Foundry', blurb: 'Furnaces and conveyor lines around a molten crucible.' },
-  vault: { name: 'Server Vault', blurb: 'Tight aisles between server racks. Close-quarters fighting.' },
+  reactor: { name: 'Reactor Hall', blurb: 'Open floor around the core, with a raised gallery in each corner. Long sightlines.' },
+  foundry: { name: 'Foundry', blurb: 'Furnaces and conveyor lines around a molten crucible, with a bridge across the top.' },
+  vault: { name: 'Server Vault', blurb: 'Tight aisles between server racks, and catwalks along their tops.' },
   yard: { name: 'Rain Yard', blurb: 'Outdoors at night in the rain. Three levels: container lanes, catwalks, and bridges across the stacks.' },
-  frost: { name: 'Frost Outpost', blurb: 'Outdoors in falling snow. Huts, snow banks and a radio mast.' },
+  frost: { name: 'Frost Outpost', blurb: 'Outdoors in falling snow. Hut roofs joined by bridges, and a lookout up the radio mast.' },
 };
 
 /** Colour grade applied after bloom. Tints are multipliers for dark and bright areas. */
@@ -80,7 +80,7 @@ const THEMES: Record<ArenaId, Theme> = {
     // Kept dim on purpose: lit snow must stay below the bloom threshold (1.0) or it glows and washes out the view.
     fog: 0x8e9bab, fogDensity: 0.016, hemiSky: 0xb8c6d6, hemiGround: 0x5a6573, hemi: 0.75, sun: 0xfff1de, sunI: 1.25,
     corners: [0xfff2e0, 0xe6f0ff], cornerI: 45, coreLight: 0xff5a40, coreI: 40, coreY: 8,
-    outdoor: true, sky: 0x8e9bab, weather: 'snow', env: 0.3, skyTop: 0x737f8e, skyHorizon: 0xa3aebb,
+    outdoor: true, sky: 0x8e9bab, weather: 'snow', env: 0.3, wallH: 9, skyTop: 0x737f8e, skyHorizon: 0xa3aebb,
     grade: { shadows: [0.92, 0.98, 1.08], highlights: [1.0, 1.0, 1.0], saturation: 0.92, contrast: 1.06, vignette: 0.18 },
   },
 };
@@ -580,7 +580,7 @@ export class World {
   }
 
   private buildReactor() {
-    const H = CEIL, m = this.m;
+    const H = CEIL, m = this.m, L2 = 2.6;
     this.box(0, 0.5, 0, 3.4, 1, 3.4, m.trim);
     this.box(0, 1.1, 0, 2.6, 0.2, 2.6, m.dark);
     this.collision.add(0, H / 2, 0, 1.5, H, 1.5);
@@ -604,6 +604,14 @@ export class World {
       this.box(19 * qx, 0.75, 5.5 * qz, 1.5, 1.5, 1.5, m.crate, { tex: 1.5 });
       this.barrier(7 * qx, 6.5 * qz, 0.5, 4.5);
       this.vents.push(new THREE.Vector3(13.2 * qx, H - 1.6, 13.2 * qz));
+      // Level 2: a gallery round the outer corner joining the tops of the two containers, with
+      // stairs at one end and a ramp at the other (swapped in alternate corners).
+      const stairsFirst = qx * qz > 0;
+      this.flight(24 * qx, 4.4 * qz, 'z', qz, 6.5, 2.6, 0, L2, stairsFirst ? { solid: true } : { ramp: true });
+      this.deck(24 * qx, 21.45 * qz, 2.6, 8.7, L2);
+      this.deck(19.9 * qx, 24.5 * qz, 5.6, 2.6, L2);
+      this.box(23 * qx, (L2 - 0.2) / 2, 23.5 * qz, 0.3, L2 - 0.2, 0.3, m.dark, { tex: 1 });
+      this.flight(4.4 * qx, 24.5 * qz, 'x', qx, 6.5, 2.6, 0, L2, stairsFirst ? { ramp: true } : { solid: true });
     }
     for (const sgn of [1, -1]) { this.barrier(0, 12 * sgn, 5, 0.5); this.barrier(18 * sgn, 0, 0.5, 5); }
     this.dressReactor();
@@ -760,8 +768,17 @@ export class World {
     // Gantry crane over the crucible
     this.box(0, 7.1, 0, 30, 0.7, 0.9, m.contA, { collide: false, cast: false });
     this.box(0, 6.3, 0, 1.6, 0.9, 1.6, m.dark, { collide: false, cast: false });
-    this.deco(new THREE.CylinderGeometry(0.05, 0.05, 2.2, 6), m.dark, 0, 4.8, 0, false);
-    this.deco(new THREE.TorusGeometry(0.28, 0.07, 6, 12, Math.PI * 1.4), m.trim, 0, 3.55, 0, false);
+    // The hook is drawn up clear of anyone crossing the bridge below it.
+    this.deco(new THREE.TorusGeometry(0.28, 0.07, 6, 12, Math.PI * 1.4), m.trim, 0, 5.6, 0, false);
+    // Level 2: a bridge across the hall over the crucible, stairs down to each side gate, and
+    // short wings to stand on over the molten metal.
+    const L2 = 3.4;
+    this.deck(0, 0, 24.2, 2.6, L2);
+    this.deck(0, 0, 2.6, 12, L2);
+    for (const s of [1, -1]) {
+      this.flight(20.6 * s, 0, 'x', -s, 8.5, 2.6, 0, L2, { solid: true });
+      this.box(7 * s, (L2 - 0.2) / 2, 0, 0.4, L2 - 0.2, 0.4, m.dark, { tex: 1 });
+    }
     // Glowing channels fed from the crucible (visual only)
     for (const s of [1, -1]) {
       this.lamp(s * 9.5, 0.012, 0, 14, 0.02, 0.5, m.core);
@@ -790,12 +807,11 @@ export class World {
       this.pillar(23.5 * qx, 13.5 * qz, m.stripA);
       this.vents.push(new THREE.Vector3(11 * qx, H - 1.6, 6 * qz));
     }
-    for (const s of [1, -1]) this.barrier(17 * s, 0, 0.5, 6);
     this.dressFoundry();
   }
 
   private buildVault() {
-    const H = CEIL, m = this.m;
+    const H = CEIL, m = this.m, L2 = 4.3;
     // Data core
     this.box(0, 0.4, 0, 3, 0.8, 3, m.trim);
     this.collision.add(0, H / 2, 0, 1.6, H, 1.6);
@@ -822,6 +838,11 @@ export class World {
       this.box(23.5 * qx, 0.6, 3.6 * qz, 1.2, 1.2, 1.2, m.crate2, { tex: 1.2 });
       this.barrier(22.5 * qx, 13.5 * qz, 3.5, 0.5);
       this.vents.push(new THREE.Vector3(8.5 * qx, H - 1.6, 13.5 * qz));
+      // Level 2: catwalks above the racks (clear of their cable trays): one across the three
+      // rows by the centre aisle with stairs from the side lane, one along the inner row.
+      this.flight(27.7 * qx, 8 * qz, 'x', -qx, 11, 2.6, 0, L2);
+      this.deck(10.7 * qx, 8 * qz, 12, 2.6, L2);
+      this.deck(6 * qx, 15.9 * qz, 2.6, 13.2, L2);
     }
     for (const s of [1, -1]) this.barrier(0, 13.5 * s, 4, 0.5);
     this.dressVault();
@@ -878,7 +899,7 @@ export class World {
 
   /** Snowed-in outpost: prefab huts, fuel tanks, snow banks and a radio mast. */
   private buildFrost() {
-    const m = this.m;
+    const m = this.m, L2 = 3.32, L3 = 5.92;
     // Radio mast with a red beacon
     this.box(0, 0.4, 0, 2.6, 0.8, 2.6, m.dark);
     this.collision.add(0, 6, 0, 1, 12, 1);
@@ -907,7 +928,21 @@ export class World {
       this.box(18 * qx, 0.75, 4 * qz, 1.5, 1.5, 1.5, m.crate2, { tex: 1.5 });
       this.box(18 * qx, 1.57, 4 * qz, 1.56, 0.14, 1.56, m.snow, { collide: false });
       this.vents.push(new THREE.Vector3(12 * qx, 9, 9 * qz));
+      // Level 2: the hut roof (its snow cap and chimney become solid), with a ramp up the back.
+      this.collision.add(hx, 3.16, hz, 6.4, 0.32, 4.8);
+      this.collision.add(hx + 2 * qx, 3.9, hz + 1.2 * qz, 0.4, 1.2, 0.4);
+      this.flight(15 * qx, 26.7 * qz, 'z', -qz, 8.3, 2.6, 0, L2, { ramp: true });
     }
+    // Bridges between the hut roofs on each side of the yard.
+    for (const s of [1, -1]) {
+      this.deck(0, 16 * s, 23.6, 2.6, L2);
+      for (const x of [-5, 5]) this.box(x, (L2 - 0.2) / 2, 16 * s, 0.4, L2 - 0.2, 0.4, m.dark, { tex: 1 });
+    }
+    // Level 3: stairs from the far bridge up to a lookout round the mast. The near side stays
+    // open so the spawn point has clear sky.
+    this.flight(0, -14.7, 'z', 1, 11.5, 2.6, L2, L3);
+    this.deck(0, 0, 6.4, 6.4, L3);
+    for (const qx of [1, -1]) for (const qz of [1, -1]) this.box(3 * qx, (L3 - 0.2) / 2, 3 * qz, 0.3, L3 - 0.2, 0.3, m.dark, { tex: 1 });
     for (const s of [1, -1]) {
       this.box(0, 0.5, 14 * s, 5, 1.0, 1.5, m.snow, { tex: 2 });
       this.box(15.5 * s, 0.5, 0, 1.5, 1.0, 5, m.snow, { tex: 2 });

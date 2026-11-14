@@ -8,6 +8,8 @@ const EPS = 1e-4;
 /** Static world made of axis-aligned boxes. Cheap and predictable. */
 export class CollisionWorld {
   boxes: Box[] = [];
+  /** Half the side of the playable square, set by the arena that is loaded. */
+  half = 30;
 
   add(cx: number, cy: number, cz: number, sx: number, sy: number, sz: number): Box {
     const b = {

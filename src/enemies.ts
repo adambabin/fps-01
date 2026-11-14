@@ -6,7 +6,7 @@ import { ROBOT_STEP, type FlowField } from './nav';
 import { raySphere, type CollisionWorld } from './physics';
 import type { Player } from './player';
 import { createRobot } from './robotModels';
-import { ARENA, CEIL } from './world';
+import { CEIL } from './world';
 
 export type EnemyType = 'scuttler' | 'trooper' | 'drone' | 'heavy' | 'boss';
 
@@ -225,7 +225,8 @@ export class Enemy {
     } else if (boss) {
       // Warden: slow orbit above the cover, cycling barrage, rocket salvo and ground pulse.
       this.orbit += dt * 0.22 * this.strafe;
-      v1.set(Math.max(-21, Math.min(21, p.pos.x + Math.cos(this.orbit) * 14)), 5.3 + Math.sin(this.age * 0.8) * 0.5, Math.max(-21, Math.min(21, p.pos.z + Math.sin(this.orbit) * 14))).sub(this.pos);
+      const reach = c.world.half - 9;
+      v1.set(Math.max(-reach, Math.min(reach, p.pos.x + Math.cos(this.orbit) * 14)), 5.3 + Math.sin(this.age * 0.8) * 0.5, Math.max(-reach, Math.min(reach, p.pos.z + Math.sin(this.orbit) * 14))).sub(this.pos);
       const l = v1.length() || 1, k = Math.min(1, l / 4);
       wx = (v1.x / l) * k; wy = (v1.y / l) * k; wz = (v1.z / l) * k;
       facePlayer = true;
@@ -294,7 +295,7 @@ export class Enemy {
       // Keep ground robots from standing inside the player.
       if (dist < def.radius + 0.4 && Math.abs(dy) < def.height) { this.pos.x -= tx * (def.radius + 0.4 - dist); this.pos.z -= tz * (def.radius + 0.4 - dist); }
     }
-    const lim = ARENA - def.radius;
+    const lim = c.world.half - def.radius;
     this.pos.x = Math.max(-lim, Math.min(lim, this.pos.x)); this.pos.z = Math.max(-lim, Math.min(lim, this.pos.z));
 
     // Facing

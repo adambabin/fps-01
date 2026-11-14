@@ -8,15 +8,19 @@ import { makeHazardTexture, makeMacroTexture, makeRadialTexture, makeSignTexture
 export const ARENA = 30;
 export const CEIL = 9;
 
-export type ArenaId = 'reactor' | 'foundry' | 'vault' | 'yard' | 'frost';
+export type ArenaId = 'reactor' | 'foundry' | 'vault' | 'yard' | 'frost' | 'city';
 /** Order used when the arena changes after each boss. */
-export const ARENA_ORDER: ArenaId[] = ['reactor', 'foundry', 'vault', 'yard', 'frost'];
+export const ARENA_ORDER: ArenaId[] = ['reactor', 'foundry', 'vault', 'yard', 'frost', 'city'];
+/** Half the side of a big free-roam map, against ARENA (30) for the others. */
+export const BIG = 90;
+const BIG_ARENAS: ArenaId[] = ['city'];
 export const ARENAS: Record<ArenaId, { name: string; blurb: string }> = {
   reactor: { name: 'Reactor Hall', blurb: 'Open floor around the core, with a raised gallery in each corner. Long sightlines.' },
   foundry: { name: 'Foundry', blurb: 'Furnaces and conveyor lines around a molten crucible, with a bridge across the top.' },
   vault: { name: 'Server Vault', blurb: 'Tight aisles between server racks, and catwalks along their tops.' },
   yard: { name: 'Rain Yard', blurb: 'Outdoors at night in the rain. Three levels: container lanes, catwalks, and bridges across the stacks.' },
   frost: { name: 'Frost Outpost', blurb: 'Outdoors in falling snow. Hut roofs joined by bridges, and a lookout up the radio mast.' },
+  city: { name: 'City', blurb: 'Big map, free to roam: a plaza, a market street, a construction site, a car park and tenement alleys.' },
 };
 
 /** Colour grade applied after bloom. Tints are multipliers for dark and bright areas. */
@@ -73,6 +77,15 @@ const THEMES: Record<ArenaId, Theme> = {
     outdoor: true, sky: 0x0b1017, weather: 'rain', floorRough: 0.5, env: 0.85, wallH: 9,
     ownEnv: true, skyTop: 0x04060a, skyHorizon: 0x303b4b,
     grade: { shadows: [0.86, 0.97, 1.1], highlights: [1.05, 1.0, 0.94], saturation: 0.95, contrast: 1.08, vignette: 0.28 },
+  },
+  city: {
+    // Dusk: a low warm sun, cool sky light and lit windows.
+    floor: 0x8a8d92, wall: 0xb9b2a6, trim: 0x9d978e, dark: 0x3d4048,
+    stripA: [1.5, 1.0, 0.45], stripB: [0.5, 1.5, 2.2], core: [3.0, 1.3, 0.45], panel: [1.5, 1.4, 1.15],
+    fog: 0x5b5670, fogDensity: 0.0075, hemiSky: 0x93a3dc, hemiGround: 0x4a3c34, hemi: 1.15, sun: 0xffb478, sunI: 2.1,
+    corners: [0xffd9a0, 0xffe8c8], cornerI: 120, coreLight: 0xffc890, coreI: 90, coreY: 6,
+    outdoor: true, sky: 0x5b5670, floorRough: 0.9, env: 0.6, skyTop: 0x1a2140, skyHorizon: 0xe08a55,
+    grade: { shadows: [0.9, 0.94, 1.1], highlights: [1.08, 1.0, 0.9], saturation: 1.05, contrast: 1.06, vignette: 0.24 },
   },
   frost: {
     floor: 0xf4f7fb, wall: 0xc9d2dc, trim: 0xd9e0e8, dark: 0x4b535e,
@@ -191,6 +204,8 @@ export class World {
   /** Current weather, for ambient audio. */
   weather: 'none' | 'rain' | 'snow' = 'none';
   private theme: Theme = THEMES.reactor;
+  /** Half the side of the loaded arena's playable square. */
+  half = ARENA;
   /** Set dressing waiting to be merged into one mesh per material at the end of `load`. */
   private batches = new Map<string, { mat: THREE.Material; cast: boolean; receive: boolean; late: boolean; geos: THREE.BufferGeometry[] }>();
   /** True while the floor, walls and ceiling are being built: they are drawn after everything else so the props in front hide them first. */
@@ -303,6 +318,8 @@ export class World {
     }
     this.collision.boxes.length = 0;
     this.gates = []; this.vents = [];
+    this.half = this.collision.half = BIG_ARENAS.includes(id) ? BIG : ARENA;
+    this.sun.position.set(14, 34, 9); this.sun.target.position.set(0, 0, 0); this.sun.target.updateMatrixWorld();
 
     const t = this.theme = THEMES[id], m = this.m;
     m.floor.color.setHex(t.floor); m.wall.color.setHex(t.wall); m.trim.color.setHex(t.trim); m.dark.color.setHex(t.dark);
@@ -327,11 +344,14 @@ export class World {
     this.corners.forEach((l, i) => { l.color.setHex(t.corners[i === 0 || i === 3 ? 0 : 1]); l.intensity = t.cornerI; });
     this.coreLight.color.setHex(t.coreLight); this.coreLight.position.set(0, t.coreY, 0);
 
-    this.late = true; this.shell(); this.late = false;
+    this.late = true; if (this.big) this.shellBig(); else this.shell(); this.late = false;
     if (id === 'reactor') this.buildReactor(); else if (id === 'foundry') this.buildFoundry(); else if (id === 'vault') this.buildVault();
-    else if (id === 'yard') this.buildYard(); else this.buildFrost();
+    else if (id === 'yard') this.buildYard(); else if (id === 'city') this.buildCity(); else this.buildFrost();
     this.flush();
   }
+
+  /** True for the large free-roam maps. */
+  get big(): boolean { return this.half > ARENA; }
 
   /** Colour grade for the loaded arena. */
   get grade(): Grade { return this.theme.grade ?? NEUTRAL; }
@@ -734,12 +754,12 @@ export class World {
   }
 
   /** Sky dome for outdoor arenas: a vertical gradient from the horizon colour up to the colour overhead. */
-  private sky() {
-    const t = this.theme, g = new THREE.SphereGeometry(150, 32, 12, 0, Math.PI * 2, 0, Math.PI / 2 + 0.12);
+  private sky(radius = 150) {
+    const t = this.theme, g = new THREE.SphereGeometry(radius, 32, 12, 0, Math.PI * 2, 0, Math.PI / 2 + 0.12);
     const pos = g.attributes.position as THREE.BufferAttribute, col = new Float32Array(pos.count * 3);
     const top = new THREE.Color(t.skyTop ?? t.sky ?? 0), hor = new THREE.Color(t.skyHorizon ?? t.sky ?? 0), c = new THREE.Color();
     for (let i = 0; i < pos.count; i++) {
-      c.copy(hor).lerp(top, Math.pow(Math.max(0, pos.getY(i) / 150), 0.45));
+      c.copy(hor).lerp(top, Math.pow(Math.max(0, pos.getY(i) / radius), 0.45));
       col[i * 3] = c.r; col[i * 3 + 1] = c.g; col[i * 3 + 2] = c.b;
     }
     g.setAttribute('color', new THREE.BufferAttribute(col, 3));
@@ -1088,7 +1108,185 @@ export class World {
     this.stains(r, [[24, 6], [15, 12.5]], 10);
   }
 
+  // ---------- City (big map) ----------
+
+  /** Ground, an invisible lid and a wall of tall buildings round the edge of a big outdoor map. */
+  private shellBig() {
+    const H = this.half, m = this.m, edge = H - 14;
+    this.box(0, -0.5, 0, H * 2, 1, H * 2, m.asphalt, { cast: false, tex: 4 });
+    this.collision.add(0, 14.5, 0, H * 2 + 2, 1, H * 2 + 2);
+    const r = this.rng(101), mats = [m.wall, m.contA, m.pillar, m.contB];
+    for (const [ax, sgn] of [[0, 1], [0, -1], [1, 1], [1, -1]] as const) {
+      // Six buildings a side fill the strip between the ring road and the map edge.
+      const span = ax === 0 ? H * 2 : edge * 2, n = 6, w = span / n;
+      for (let i = 0; i < n; i++) {
+        const c = -span / 2 + (i + 0.5) * w, h = 16 + Math.floor(r() * 5) * 4, mat = mats[(i + (ax ? 1 : 0) + (sgn > 0 ? 0 : 2)) % 4], mid = (edge + 7) * sgn;
+        if (ax === 0) { this.box(c, h / 2, mid, w, h, 14, mat, { tex: 6 }); this.windows(c - w / 2, c + w / 2, mid - 7, mid + 7, h, r, sgn > 0 ? 'z-' : 'z+'); }
+        else { this.box(mid, h / 2, c, 14, h, w, mat, { tex: 6 }); this.windows(mid - 7, mid + 7, c - w / 2, c + w / 2, h, r, sgn > 0 ? 'x-' : 'x+'); }
+      }
+    }
+  }
+
+  /** Rows of windows on the named faces of a building (all four by default). About a third are lit. */
+  private windows(x0: number, x1: number, z0: number, z1: number, h: number, r: () => number, faces = 'x-x+z-z+') {
+    const m = this.m;
+    const row = (along: 'x' | 'z', a0: number, a1: number, at: number, ry: number) => {
+      const n = Math.floor((a1 - a0 - 1.2) / 3);
+      for (let y = 2.4; y < h - 1.6; y += 3.2) for (let i = 0; i < n; i++) {
+        const a = (a0 + a1) / 2 + (i - (n - 1) / 2) * 3, k = r(), mat = k < 0.22 ? m.stripA : k < 0.32 ? m.panel : m.dark;
+        this.d(new THREE.PlaneGeometry(1.5, 1.3), mat, along === 'x' ? a : at, y, along === 'x' ? at : a, { ry, cast: false });
+      }
+    };
+    if (faces.includes('z+')) row('x', x0, x1, z1 + 0.03, 0);
+    if (faces.includes('z-')) row('x', x0, x1, z0 - 0.03, Math.PI);
+    if (faces.includes('x+')) row('z', z0, z1, x1 + 0.03, Math.PI / 2);
+    if (faces.includes('x-')) row('z', z0, z1, x0 - 0.03, -Math.PI / 2);
+  }
+
+  /**
+   * The City: a 180 m square of streets with a different district in each quarter, free to roam.
+   * Two 24 m avenues cross at a central plaza; a ring road runs round the outside in front of
+   * the boundary buildings. Each 48 m block between them is its own area:
+   *   north-east  market street: two shop rows with raised walkways and a bridge between them
+   *   south-east  construction site: a concrete core wrapped in two levels of scaffolding
+   *   south-west  car park: a parking deck on columns with a ramp and a stair
+   *   north-west  tenements: four apartment blocks split by alleys, with a fire-escape walkway
+   * Robots come from spawn points all over the map; `Game.pickGate` uses the ones near the player.
+   */
+  private buildCity() {
+    const m = this.m, r = this.rng(211), H = this.half;
+    this.sky(300);
+    // Corner helpers: a district is written once in positive coordinates and mirrored into its quarter.
+    let qx = 1, qz = 1;
+    const B = (x0: number, x1: number, z0: number, z1: number, y0: number, y1: number, mat: THREE.Material, o: BoxOpts = {}) =>
+      this.box(((x0 + x1) / 2) * qx, (y0 + y1) / 2, ((z0 + z1) / 2) * qz, x1 - x0, y1 - y0, z1 - z0, mat, o);
+    const building = (x0: number, x1: number, z0: number, z1: number, h: number, mat: THREE.Material) => {
+      B(x0, x1, z0, z1, 0, h, mat, { tex: 6 });
+      this.windows(Math.min(x0 * qx, x1 * qx), Math.max(x0 * qx, x1 * qx), Math.min(z0 * qz, z1 * qz), Math.max(z0 * qz, z1 * qz), h, r);
+    };
+    const deck = (x0: number, x1: number, z0: number, z1: number, top: number) => this.deck(((x0 + x1) / 2) * qx, ((z0 + z1) / 2) * qz, x1 - x0, z1 - z0, top);
+    const flight = (x: number, z: number, axis: 'x' | 'z', sign: number, run: number, width: number, y0: number, y1: number, o: { ramp?: boolean; solid?: boolean } = {}) =>
+      this.flight(x * qx, z * qz, axis, sign * (axis === 'x' ? qx : qz), run, width, y0, y1, o);
+    const post = (x: number, z: number, top: number) => B(x - 0.15, x + 0.15, z - 0.15, z + 0.15, 0, top - 0.2, m.dark, { tex: 1 });
+    const cover = (x: number, z: number, sx: number, sz: number) => this.barrier(x * qx, z * qz, sx, sz);
+    const crate = (x: number, z: number, s: number, mat: THREE.Material = m.crate) => B(x - s / 2, x + s / 2, z - s / 2, z + s / 2, 0, s, mat, { tex: s });
+    /** A parked car: low body and cabin, good for crouching behind. `y0` puts it on a raised deck. */
+    const car = (x: number, z: number, alongX: boolean, mat: THREE.Material, y0 = 0) => {
+      const l = 2.2, w = 0.95;
+      B(x - (alongX ? l : w), x + (alongX ? l : w), z - (alongX ? w : l), z + (alongX ? w : l), y0 + 0.25, y0 + 1.0, mat, { tex: 2 });
+      B(x - (alongX ? 1.1 : 0.85), x + (alongX ? 1.1 : 0.85), z - (alongX ? 0.85 : 1.1), z + (alongX ? 0.85 : 1.1), y0 + 1.0, y0 + 1.6, m.dark, { tex: 1 });
+      this.collision.add(x * qx, y0 + 0.125, z * qz, alongX ? 3.6 : 1.7, 0.25, alongX ? 1.7 : 3.6);
+    };
+    /** A marked pad robots arrive on, somewhere in the open. */
+    const pad = (x: number, z: number) => {
+      const pos = new THREE.Vector3(x, 0, z), dir = new THREE.Vector3(-x, 0, -z).normalize();
+      this.gates.push({ pos, dir });
+      this.d(new THREE.RingGeometry(1.5, 1.9, 24), m.hazard, x, 0.02, z, { rx: -Math.PI / 2, cast: false });
+      this.lamp(x, 0.03, z, 0.5, 0.04, 0.5, m.red);
+    };
+
+    // --- Streets: pavement under each block, spawn doors on the boundary, pads in the open ---
+    for (qx of [1, -1]) for (qz of [1, -1]) this.dbox(36 * qx, 0.03, 36 * qz, 48, 0.06, 48, m.trim, false, 4);
+    const edge = H - 14;
+    for (const [ax, sgn] of [[0, 1], [0, -1], [1, 1], [1, -1]] as const) for (const c of [-36, 0, 36]) {
+      // Garage doors in the boundary buildings.
+      const x = ax ? (edge - 3) * sgn : c, z = ax ? c : (edge - 3) * sgn;
+      this.gates.push({ pos: new THREE.Vector3(x, 0, z), dir: new THREE.Vector3(ax ? -sgn : 0, 0, ax ? 0 : -sgn) });
+      const fx = ax ? (edge - 0.06) * sgn : c, fz = ax ? c : (edge - 0.06) * sgn;
+      this.dbox(fx, 1.9, fz, ax ? 0.1 : 5.4, 3.8, ax ? 5.4 : 0.1, m.dark, false);
+      this.lamp(ax ? (edge - 0.2) * sgn : c, 3.95, ax ? c : (edge - 0.2) * sgn, ax ? 0.1 : 4.8, 0.12, ax ? 4.8 : 0.1, m.red);
+    }
+    for (const s of [1, -1]) { pad(42 * s, 0); pad(0, 42 * s); pad(68 * s, 68); pad(68 * s, -68); }
+
+    // --- Plaza and avenues ---
+    qx = qz = 1;
+    this.box(0, 0.5, 0, 5, 1, 5, m.trim);
+    this.box(0, 5, 0, 1.8, 8, 1.8, m.pillar, { tex: 2 });
+    this.box(0, 9.3, 0, 2.6, 0.6, 2.6, m.trim, { collide: false });
+    for (const [ox, oz] of [[0.92, 0], [-0.92, 0], [0, 0.92], [0, -0.92]]) this.lamp(ox, 5, oz, ox ? 0.05 : 0.2, 6, oz ? 0.05 : 0.2, m.core);
+    for (const [x, z] of [[8.5, -8.5], [-8.5, -8.5], [8.5, 8.5], [-8.5, 8.5]]) {
+      this.box(x, 1.4, z, 3.2, 2.8, 2.6, m.contB, { tex: 2 });
+      this.lamp(x, 2.2, z + (z < 0 ? 1.32 : -1.32), 2.4, 0.5, 0.04, m.stripB);
+    }
+    for (const s of [1, -1]) {
+      // Median planters, wrecks and barricades down each avenue and along the ring road.
+      for (const c of [26, 52]) { this.barrier(0, c * s, 1.4, 9); this.barrier(c * s, 0, 9, 1.4); }
+      for (const c of [-40, 22, 50]) { this.barrier(68 * s, c, 0.6, 6); this.barrier(c, 68 * s, 6, 0.6); }
+    }
+    car(-6, 20, false, m.contA); car(6.5, 36, false, m.contB); car(-5.5, 58, false, m.trim); car(5, -24, false, m.trim); car(6, -62, false, m.contA);
+    car(22, 5.5, true, m.contB); car(46, -6, true, m.contA); car(-24, -5.5, true, m.trim); car(-56, 6, true, m.contB);
+    car(64, 30, false, m.trim); car(71, -22, false, m.contA); car(-64, -34, false, m.contB); car(-71, 12, false, m.trim);
+    car(30, 65, true, m.contA); car(-18, 71, true, m.contB); car(-44, -65, true, m.trim); car(14, -71, true, m.contA);
+    // A bus abandoned across the southern avenue.
+    this.box(-5, 1.75, -44, 2.9, 3.0, 11, m.contB, { tex: 3 });
+    this.lamp(-3.53, 2.3, -44, 0.04, 0.9, 9.6, m.panel);
+    // Street lamps (lit heads only; the light itself comes from the sky and sun).
+    for (const [x, z] of [[13, 13], [13, 59], [59, 13], [59, 59], [13, 36], [36, 13]]) for (const sx of [1, -1]) for (const sz of [1, -1]) {
+      this.dbox(x * sx, 3.2, z * sz, 0.16, 6.4, 0.16, m.dark);
+      this.lamp(x * sx, 6.45, z * sz, 1.1, 0.12, 0.4, m.panel);
+    }
+
+    // --- North-east: market street ---
+    qx = 1; qz = 1;
+    building(14, 58, 14, 24, 8, m.contA); building(14, 58, 48, 58, 8, m.contB);
+    for (let x = 18; x <= 54; x += 6) { this.lamp(x, 1.5, 24.04, 3.4, 1.8, 0.04, m.stripA); this.lamp(x, 1.5, 47.96, 3.4, 1.8, 0.04, m.stripA); }
+    deck(22.6, 56, 24, 27, 3); flight(15.1, 25.5, 'x', 1, 7.5, 3, 0, 3, { solid: true });
+    deck(16, 49.4, 45, 48, 3); flight(56.9, 46.5, 'x', -1, 7.5, 3, 0, 3, { ramp: true });
+    deck(34.5, 37.5, 27, 45, 3); post(36, 31, 3); post(36, 41, 3);
+    cover(24, 33, 4, 1.2); cover(46, 39, 4, 1.2); cover(30, 41, 1.2, 4); cover(42, 31, 1.2, 4);
+    crate(20, 40, 1.5); crate(21.6, 40.4, 1, m.crate2); crate(52, 32, 1.5, m.crate2); crate(50.4, 31.4, 1.2);
+
+    // --- South-east: construction site ---
+    qx = 1; qz = -1;
+    B(28, 44, 28, 44, 0, 11, m.wall, { tex: 6 });
+    deck(25, 47, 25, 28, 2.6); deck(25, 47, 44, 47, 2.6); deck(25, 28, 28, 44, 2.6); deck(44, 47, 28, 44, 2.6);
+    flight(18.4, 26.5, 'x', 1, 6.6, 3, 0, 2.6, { ramp: true });
+    flight(26.5, 37.4, 'z', 1, 6.6, 3, 2.6, 5.2);
+    deck(25, 47, 44, 47, 5.2); deck(44, 47, 28, 44, 5.2);
+    for (const [x, z] of [[25.3, 25.3], [46.7, 25.3], [25.3, 46.7], [46.7, 46.7], [36, 25.3], [36, 46.7], [46.7, 36]]) post(x, z, x > 40 || z > 40 ? 5.2 : 2.6);
+    B(16.7, 19.3, 36.9, 43.1, 0, 2.6, m.contA, { tex: 2.6 }); B(48.9, 55.1, 16.7, 19.3, 0, 2.6, m.contB, { tex: 2.6 });
+    B(49, 55, 50, 54, 0, 1, m.trim, { tex: 2 }); B(50, 54, 50.6, 53.4, 1, 1.8, m.trim, { tex: 2 });
+    cover(36, 15, 10, 0.5); cover(15, 30, 0.5, 8); crate(20, 52, 1.5); crate(21.7, 51.5, 1.2, m.crate2); crate(54, 34, 1.5, m.crate2);
+    // Tower crane: a solid mast, the jib is only dressing.
+    B(53.3, 54.7, 55.3, 56.7, 0, 14, m.contA, { tex: 1.4 });
+    this.dbox(54 * qx, 20, 56 * qz, 1.2, 12, 1.2, m.contA, true); this.dbox(40 * qx, 25.5, 56 * qz, 44, 1, 1, m.contA, true);
+
+    // --- South-west: car park ---
+    qx = -1; qz = -1;
+    const P = 3.6;
+    B(16, 56, 16, 44, P - 0.3, P, m.pillar, { tex: 4 });
+    for (const x of [18, 30, 42, 54]) for (const z of [18, 30, 42]) B(x - 0.3, x + 0.3, z - 0.3, z + 0.3, 0, P - 0.3, m.pillar, { tex: 1 });
+    // Parapet round the deck, open where the ramp and the stair arrive.
+    B(16, 43.9, 16, 16.3, P, P + 1, m.trim); B(16, 16.3, 16, 44, P, P + 1, m.trim); B(55.7, 56, 16, 44, P, P + 1, m.trim);
+    B(32.1, 56, 43.7, 44, P, P + 1, m.trim); B(16, 20, 43.7, 44, P, P + 1, m.trim);
+    flight(20.1, 45.5, 'x', 1, 9, 3, 0, P, { ramp: true }); deck(29.1, 32.1, 44, 47, P);
+    flight(55.9, 14.7, 'x', -1, 9, 2.6, 0, P, { solid: true }); deck(43.9, 46.9, 13.4, 16, P);
+    car(22, 24, false, m.contA); car(36, 37, true, m.trim); car(48, 22, false, m.contB); car(26, 36, false, m.trim); car(50, 37, true, m.contA);
+    car(24, 22, false, m.contB, P); car(40, 34, true, m.contA, P); car(50, 24, false, m.trim, P); car(30, 38, true, m.contB, P);
+    cover(36, 52, 8, 0.5); crate(52, 50, 1.5); crate(18, 52, 1.2, m.crate2);
+
+    // --- North-west: tenements ---
+    qx = -1; qz = 1;
+    building(14, 33, 14, 33, 16, m.contA); building(39, 58, 14, 33, 20, m.wall);
+    building(14, 33, 39, 58, 14, m.contB); building(39, 58, 39, 58, 18, m.contA);
+    // Fire escape: up from the avenue, along one alley, across the other and down to the ring road.
+    flight(14.1, 37.7, 'x', 1, 10, 2.6, 0, 4, { solid: true });
+    deck(24.1, 52, 36.4, 39, 4); deck(33, 35.6, 39, 52, 4);
+    flight(34.3, 62, 'z', -1, 10, 2.6, 0, 4);
+    B(18.9, 21.1, 33, 34.4, 0, 1.4, m.dark, { tex: 1.4 }); B(44.9, 47.1, 33, 34.4, 0, 1.4, m.dark, { tex: 1.4 });
+    B(37.2, 38.6, 20.9, 23.1, 0, 1.4, m.dark, { tex: 1.4 }); B(37.2, 38.6, 46.9, 49.1, 0, 1.4, m.dark, { tex: 1.4 });
+    crate(54, 35.2, 1.2); crate(36, 16, 1.5, m.crate2);
+
+    // Lane paint down the avenues.
+    for (let k = -72; k <= 72; k += 6) if (Math.abs(k) > 14) { this.dbox(6, 0.012, k, 0.18, 0.024, 2.6, m.trim, false); this.dbox(-6, 0.012, k, 0.18, 0.024, 2.6, m.trim, false); this.dbox(k, 0.012, 6, 2.6, 0.024, 0.18, m.trim, false); this.dbox(k, 0.012, -6, 2.6, 0.024, 0.18, m.trim, false); }
+  }
+
   update(t: number, dt = 0, cam?: THREE.Vector3) {
+    if (cam && this.big) {
+      // The shadow map covers 72 m, so on a big map it follows the player in 4 m steps.
+      const x = Math.round(cam.x / 4) * 4, z = Math.round(cam.z / 4) * 4, tg = this.sun.target.position;
+      if (tg.x !== x || tg.z !== z) { tg.set(x, 0, z); this.sun.position.set(x + 14, 34, z + 9); this.sun.target.updateMatrixWorld(); }
+    }
     if (cam && this.rain.visible) {
       const p = this.rain.geometry.attributes.position as THREE.BufferAttribute, a = p.array as Float32Array, d = 26 * dt;
       for (let i = 1; i < a.length; i += 6) {

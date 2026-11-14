@@ -1,7 +1,9 @@
 import { Vector3 } from 'three';
 import type { Box, CollisionWorld } from './physics';
 
-const SIZE = 64, HALF = 32, N = SIZE * SIZE, FAR = 30000;
+/** Grid dimensions; set from the arena's size in `rebuild` (64 cells for the 60 m arenas). */
+let SIZE = 64, HALF = 32, N = SIZE * SIZE;
+const FAR = 30000;
 /** Walkable surfaces kept per grid cell (floor, deck above it, and so on). */
 const K = 4;
 /** Height a ground robot steps up or down without it counting as a drop. */
@@ -35,6 +37,12 @@ export class FlowField {
 
   /** Recomputes surfaces and links; call after the arena's collision boxes change. */
   rebuild(world: CollisionWorld) {
+    const size = world.half * 2 + 4;
+    if (size !== SIZE || this.h.length !== size * size * K) {
+      SIZE = size; HALF = size / 2; N = size * size;
+      this.h = new Float32Array(N * K); this.count = new Uint8Array(N); this.link = new Uint8Array(N * K * 4);
+      this.main = new Uint8Array(N * K); this.dist = new Int16Array(N * K); this.queue = new Int32Array(N * K);
+    }
     const h = this.h, count = this.count, link = this.link;
     const near: Box[][] = Array.from({ length: N }, () => []);
     for (const b of world.boxes) {
@@ -86,7 +94,8 @@ export class FlowField {
             // between two structures that happen to be at similar heights.
             const y2 = h[n * K + best], mx = ci - HALF + 0.5 + DI[d] / 2, mz = cj - HALF + 0.5 + DJ[d] / 2;
             const lo = Math.min(y, y2) - 0.05, hi = Math.max(y, y2) + 0.05;
-            const bridged = (b: Box) => b.max.y >= lo && b.max.y <= hi && mx > b.min.x && mx < b.max.x && mz > b.min.z && mz < b.max.z;
+            // Inclusive, so two decks that meet exactly on the line between the cells count as joined.
+            const bridged = (b: Box) => b.max.y >= lo && b.max.y <= hi && mx >= b.min.x - 0.01 && mx <= b.max.x + 0.01 && mz >= b.min.z - 0.01 && mz <= b.max.z + 0.01;
             if (!near[c].some(bridged) && !near[n].some(bridged)) best = NONE;
           }
           if (best === NONE && below !== NONE && !obstructed(n, y)) best = below;

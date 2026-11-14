@@ -189,6 +189,7 @@ export class Game {
   private clearT = 0;
   private offers: Upgrade[] = [];
   private navT = 0;
+  private catchUpT = 0;
   private time = 0;
   private runTime = 0;
   private lastT = 0;
@@ -223,6 +224,7 @@ export class Game {
 
     this.world = new World(this.scene, this.renderer);
     this.world.load(this.settings.arena in ARENAS ? this.settings.arena : 'reactor');
+    this.camera.far = this.world.big ? 420 : 200;
     this.nav = new FlowField(this.world.collision);
     this.effects = new Effects(this.scene);
     this.player = new Player(this.world.collision, this.audio);
@@ -418,6 +420,10 @@ export class Game {
   private loadArena(id: ArenaId) {
     this.world.load(id);
     this.nav.rebuild(this.world.collision);
+    // Big maps need a longer view distance; fog still closes it off.
+    this.camera.far = this.world.big ? 420 : 200;
+    this.camera.updateProjectionMatrix();
+    this.catchUpT = 0;
     this.audio.setWeather(this.world.weather);
   }
 
@@ -524,24 +530,61 @@ export class Game {
     else { this.ui.announce('WAVE ' + w, `${q.length} HOSTILES`); this.audio.waveStart(); }
   }
 
+  /**
+   * A spawn point for a ground robot. Small arenas use any gate the player is not standing in;
+   * big maps use the ones around the player, close enough to reach them soon but not on top of them.
+   */
+  private pickGate() {
+    const all = this.world.gates, p = this.player.pos;
+    let gates = all.filter((g) => g.pos.distanceTo(p) > 12);
+    if (this.world.big) {
+      const near = all.filter((g) => { const d = Math.hypot(g.pos.x - p.x, g.pos.z - p.z); return d > 16 && d < 62; });
+      gates = near.length ? near : [...all].sort((a, b) => a.pos.distanceTo(p) - b.pos.distanceTo(p)).slice(0, 3);
+    }
+    if (!gates.length) gates = all;
+    return gates[(Math.random() * gates.length) | 0];
+  }
+
+  /**
+   * Big maps only: a ground robot left far behind when the player moves on is brought back in
+   * at a spawn point near them, so a wave never stalls on stragglers across the map.
+   */
+  private catchUp(dt: number) {
+    if (!this.world.big || (this.catchUpT -= dt) > 0) return;
+    this.catchUpT = 1;
+    const p = this.player.pos;
+    for (const e of this.enemies.list) {
+      if (e.type === 'boss' || Math.hypot(e.pos.x - p.x, e.pos.z - p.z) < 75) continue;
+      if (e.type === 'drone') { const a = Math.random() * Math.PI * 2; e.pos.set(p.x + Math.cos(a) * 26, CEIL - 1, p.z + Math.sin(a) * 26); }
+      else { const g = this.pickGate(); e.pos.copy(g.pos); e.yaw = Math.atan2(g.dir.x, g.dir.z); }
+      e.vel.set(0, 0, 0);
+    }
+  }
+
   private spawn(type: EnemyType) {
     const hp = (1 + 0.06 * (this.wave - 1)) * this.diff.hp, dmg = (1 + 0.03 * (this.wave - 1)) * this.diff.dmg;
     if (type === 'boss') {
       // Each return of the Warden is tougher than the last.
       const n = Math.max(1, Math.floor(this.wave / 5));
       const def = BOSSES[(n - 1) % BOSSES.length];
-      this.boss = this.enemies.spawn(type, tmpA.set(0, CEIL - 2.6, -16), (0.6 + 0.4 * n) * this.diff.hp, dmg);
+      // On a big map the boss arrives near the player, not at the map centre.
+      const p = this.player.pos, lim = this.world.collision.half - 12, big = this.world.big;
+      tmpA.set(big ? Math.max(-lim, Math.min(lim, p.x)) : 0, CEIL - 2.6, big ? Math.max(-lim, Math.min(lim, p.z - 16)) : -16);
+      this.boss = this.enemies.spawn(type, tmpA, (0.6 + 0.4 * n) * this.diff.hp, dmg);
       this.boss.label = def.name; this.boss.tier = ((n - 1) % BOSSES.length) + 1;
       this.boss.tint(def.tint);
       this.effects.explosion(tmpA, 1.2, 0.6, 2, 3.5);
     } else if (type === 'drone') {
-      const v = this.world.vents[(Math.random() * this.world.vents.length) | 0];
+      let v = this.world.vents[(Math.random() * this.world.vents.length) | 0];
+      if (this.world.big) {
+        // No fixed vents on a big map: drones drop in from the sky a short way from the player.
+        const a = Math.random() * Math.PI * 2, r = 20 + Math.random() * 12, lim = this.world.collision.half - 16;
+        v = tmpC.set(Math.max(-lim, Math.min(lim, this.player.pos.x + Math.cos(a) * r)), CEIL, Math.max(-lim, Math.min(lim, this.player.pos.z + Math.sin(a) * r)));
+      }
       this.enemies.spawn(type, tmpA.copy(v).add(tmpB.set(Math.random() - 0.5, 0, Math.random() - 0.5)), hp, dmg);
       this.effects.sparks(v, tmpB.set(0, -1, 0), 6, 0.6, 2, 3);
     } else {
-      // Prefer gates the player is not standing in.
-      const gates = this.world.gates.filter((g) => g.pos.distanceTo(this.player.pos) > 12);
-      const g = (gates.length ? gates : this.world.gates)[(Math.random() * (gates.length || 4)) | 0];
+      const g = this.pickGate();
       tmpA.copy(g.pos).addScaledVector(tmpB.set(-g.dir.z, 0, g.dir.x), (Math.random() - 0.5) * 3.6);
       const e = this.enemies.spawn(type, tmpA, hp, dmg);
       if (this.objectives.wantsPrime && type !== 'scuttler') {
@@ -697,6 +740,8 @@ export class Game {
     const h = new THREE.Vector3(2.2, 0.9, 2.2);
     for (let i = 0; i < 40; i++) {
       tmpA.set((Math.random() - 0.5) * 44, 1, (Math.random() - 0.5) * 44);
+      // On a big map the zone goes somewhere around the player, not around the map centre.
+      if (this.world.big) { const lim = this.world.collision.half - 18; tmpA.x = Math.max(-lim, Math.min(lim, tmpA.x + this.player.pos.x)); tmpA.z = Math.max(-lim, Math.min(lim, tmpA.z + this.player.pos.z)); }
       if (tmpA.distanceTo(this.player.pos) < 10 || this.world.collision.overlaps(tmpA, h)) continue;
       return tmpA.clone().setY(0);
     }
@@ -933,6 +978,7 @@ export class Game {
     this.navT -= dt;
     if (this.navT <= 0) { this.navT = 0.2; this.nav.compute(p.pos.x, p.pos.y, p.pos.z); }
 
+    this.catchUp(dt);
     this.enemies.update(dt, this.enemyCtx);
     this.projectiles.update(dt, this.projCtx);
     this.pickups.update(dt, p, (k) => this.wantsPickup(k), (k) => this.collect(k), this.pickupReach);
